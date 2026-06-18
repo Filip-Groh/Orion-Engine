@@ -3,5 +3,25 @@
 version = 4
 
 [[package]]
-name = "Orion-Engine"
+name = "orion-engine"
+version = "0.1.0"
+
+[[package]]
+name = "orion-mesh"
+version = "0.1.0"
+
+[[package]]
+name = "orion-renderer"
+version = "0.1.0"
+
+[[package]]
+name = "orion-sdf"
+version = "0.1.0"
+
+[[package]]
+name = "orion-systems"
+version = "0.1.0"
+
+[[package]]
+name = "orion-voxels"
 version = "0.1.0"

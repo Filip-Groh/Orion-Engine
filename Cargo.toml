@@ -1,6 +1,10 @@
-[package]
-name = "Orion-Engine"
-version = "0.1.0"
-edition = "2024"
-
-[dependencies]
+[workspace]
+resolver = "2"
+members = [
+    "crates/orion-engine",
+    "crates/orion-mesh",
+    "crates/orion-renderer",
+    "crates/orion-sdf",
+    "crates/orion-systems",
+    "crates/orion-voxels"
+]
