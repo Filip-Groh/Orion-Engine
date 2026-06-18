@@ -1,0 +1,7 @@
+[ver:1,total:840,branch:main]
+README.md:360,1781820000:360,r
+Cargo.toml:150,1781820000:150,m
+.gtm/Cargo-> Run.app:140,1781820000:140,r
+.gtm/Cargo-> Build orion_voxels.app:113,1781820000:53,1781823600:60,r
+.gtm/Cargo-> Build `Run`.app:50,1781820000:50,r
+.gitignore:27,1781820000:27,m
