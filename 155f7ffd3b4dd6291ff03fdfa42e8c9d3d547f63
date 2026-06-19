@@ -1,0 +1,7 @@
+[ver:1,total:1380,branch:main]
+crates/orion-engine/src/free_cam.rs:898,1781877600:225,1781881200:673,m
+crates/orion-engine/src/main.rs:198,1781877600:15,1781881200:183,m
+.gtm/Cargo-> Run.app:164,1781881200:164,r
+.gtm/Cargo-> Build `Run`.app:92,1781881200:92,r
+Cargo.toml:20,1781881200:20,r
+crates/orion-engine/src/scene.rs:8,1781881200:8,m
