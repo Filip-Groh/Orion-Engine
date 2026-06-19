@@ -8,3 +8,6 @@ members = [
     "crates/orion-systems",
     "crates/orion-voxels"
 ]
+
+[workspace.dependencies]
+bevy = { version = "0.18.1" }
