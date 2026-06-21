@@ -1021,7 +1021,7 @@ dependencies = [
  "arrayvec",
  "bevy_reflect",
  "derive_more",
- "glam 0.30.10",
+ "glam",
  "itertools 0.14.0",
  "libm",
  "rand",
@@ -1195,7 +1195,7 @@ dependencies = [
  "downcast-rs 2.0.2",
  "erased-serde",
  "foldhash 0.2.0",
- "glam 0.30.10",
+ "glam",
  "indexmap",
  "inventory",
  "petgraph",
@@ -1255,7 +1255,7 @@ dependencies = [
  "downcast-rs 2.0.2",
  "encase",
  "fixedbitset",
- "glam 0.30.10",
+ "glam",
  "image",
  "indexmap",
  "js-sys",
@@ -2616,12 +2616,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "glam"
-version = "0.33.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "898f5a568a84989b6c0f8caa50a93074b97dbdc58fc6d9543157bb4562758933"
-
-[[package]]
 name = "glob"
 version = "0.3.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2836,7 +2830,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "29a164ceff4500f2a72b1d21beaa8aa8ad83aec2b641844c659b190cb3ea2e0b"
 dependencies = [
  "constgebra",
- "glam 0.30.10",
+ "glam",
  "tinyvec",
 ]
 
@@ -3332,6 +3326,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "ndshape"
+version = "0.3.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "975bce586ad637e27f6dc26ee907c07050686a588695bfd64b7873a9d48a700c"
+dependencies = [
+ "static_assertions",
+]
+
+[[package]]
 name = "nix"
 version = "0.31.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -3748,7 +3751,7 @@ version = "0.1.0"
 name = "orion-sdf"
 version = "0.1.0"
 dependencies = [
- "glam 0.33.1",
+ "bevy",
 ]
 
 [[package]]
@@ -3758,6 +3761,11 @@ version = "0.1.0"
 [[package]]
 name = "orion-voxels"
 version = "0.1.0"
+dependencies = [
+ "bevy",
+ "ndshape",
+ "orion-sdf",
+]
 
 [[package]]
 name = "owned_ttf_parser"

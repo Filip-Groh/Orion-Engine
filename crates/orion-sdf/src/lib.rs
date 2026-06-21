@@ -1,4 +1,4 @@
-use glam::Vec3;
+use bevy::math::Vec3;
 use crate::constructive_solid_geometry::{SDFIntersection, SDFSmoothIntersection, SDFSmoothSubtraction, SDFSmoothUnion, SDFSubtraction, SDFUnion};
 
 pub mod primitives;

@@ -1,4 +1,4 @@
-use glam::{Vec2, Vec3, Vec3Swizzles};
+use bevy::math::{Vec2, Vec3, Vec3Swizzles};
 use crate::SDF;
 
 pub struct SDFCone { 

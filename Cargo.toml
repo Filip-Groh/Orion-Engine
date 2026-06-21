@@ -10,6 +10,8 @@ members = [
 ]
 
 [workspace.dependencies]
+orion-sdf = {path = "crates/orion-sdf"}
+
 bevy = "0.18.1"
 bevy_dev_tools = "0.18.1"
-glam = "0.33.1"
+ndshape = "0.3.0"
