@@ -12,3 +12,4 @@ members = [
 [workspace.dependencies]
 bevy = "0.18.1"
 bevy_dev_tools = "0.18.1"
+glam = "0.33.1"
