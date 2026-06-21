@@ -17,30 +17,30 @@ impl Plugin for ScenePlugin {
 }
 
 fn spawn_lights(mut commands: Commands) {
-    // Main light
-    commands.spawn((
-        PointLight {
-            color: Color::from(tailwind::ORANGE_300),
-            ..default()
-        },
-        Transform::from_xyz(0.0, 3.0, 0.0),
-    ));
-    // Light behind wall
-    commands.spawn((
-        PointLight {
-            color: Color::WHITE,
-            ..default()
-        },
-        Transform::from_xyz(-3.5, 3.0, 0.0),
-    ));
-    // Light under floor
-    commands.spawn((
-        PointLight {
-            color: Color::from(tailwind::RED_300),
-            ..default()
-        },
-        Transform::from_xyz(0.0, -0.5, 0.0),
-    ));
+    // // Main light
+    // commands.spawn((
+    //     PointLight {
+    //         color: Color::from(tailwind::ORANGE_300),
+    //         ..default()
+    //     },
+    //     Transform::from_xyz(0.0, 3.0, 0.0),
+    // ));
+    // // Light behind wall
+    // commands.spawn((
+    //     PointLight {
+    //         color: Color::WHITE,
+    //         ..default()
+    //     },
+    //     Transform::from_xyz(-3.5, 3.0, 0.0),
+    // ));
+    // // Light under floor
+    // commands.spawn((
+    //     PointLight {
+    //         color: Color::from(tailwind::RED_300),
+    //         ..default()
+    //     },
+    //     Transform::from_xyz(0.0, -0.5, 0.0),
+    // ));
 }
 
 fn spawn_world(
@@ -57,43 +57,43 @@ fn spawn_world(
     let red_material = materials.add(Color::from(tailwind::RED_950));
     let white_material = materials.add(Color::WHITE);
 
-    // Top side of floor
-    commands.spawn((
-        Mesh3d(floor.clone()),
-        MeshMaterial3d(white_material.clone()),
-    ));
-    // Under side of floor
-    commands.spawn((
-        Mesh3d(floor.clone()),
-        MeshMaterial3d(white_material.clone()),
-        Transform::from_xyz(0.0, -0.01, 0.0).with_rotation(Quat::from_rotation_x(PI)),
-    ));
-    // Blue sphere
-    commands.spawn((
-        Mesh3d(sphere.clone()),
-        MeshMaterial3d(blue_material.clone()),
-        Transform::from_xyz(3.0, 1.5, 0.0),
-    ));
-    // Tall wall
-    commands.spawn((
-        Mesh3d(wall.clone()),
-        MeshMaterial3d(white_material.clone()),
-        Transform::from_xyz(-3.0, 2.0, 0.0),
-    ));
-    // Cube behind wall
-    commands.spawn((
-        Mesh3d(cube.clone()),
-        MeshMaterial3d(blue_material.clone()),
-        Transform::from_xyz(-4.2, 0.5, 0.0),
-    ));
-    // Hidden cube under floor
-    commands.spawn((
-        Mesh3d(cube.clone()),
-        MeshMaterial3d(red_material.clone()),
-        Transform {
-            translation: Vec3::new(3.0, -2.0, 0.0),
-            rotation: Quat::from_euler(EulerRot::YXZEx, FRAC_PI_4, FRAC_PI_4, 0.0),
-            ..default()
-        },
-    ));
+    // // Top side of floor
+    // commands.spawn((
+    //     Mesh3d(floor.clone()),
+    //     MeshMaterial3d(white_material.clone()),
+    // ));
+    // // Under side of floor
+    // commands.spawn((
+    //     Mesh3d(floor.clone()),
+    //     MeshMaterial3d(white_material.clone()),
+    //     Transform::from_xyz(0.0, -0.01, 0.0).with_rotation(Quat::from_rotation_x(PI)),
+    // ));
+    // // Blue sphere
+    // commands.spawn((
+    //     Mesh3d(sphere.clone()),
+    //     MeshMaterial3d(blue_material.clone()),
+    //     Transform::from_xyz(3.0, 1.5, 0.0),
+    // ));
+    // // Tall wall
+    // commands.spawn((
+    //     Mesh3d(wall.clone()),
+    //     MeshMaterial3d(white_material.clone()),
+    //     Transform::from_xyz(-3.0, 2.0, 0.0),
+    // ));
+    // // Cube behind wall
+    // commands.spawn((
+    //     Mesh3d(cube.clone()),
+    //     MeshMaterial3d(blue_material.clone()),
+    //     Transform::from_xyz(-4.2, 0.5, 0.0),
+    // ));
+    // // Hidden cube under floor
+    // commands.spawn((
+    //     Mesh3d(cube.clone()),
+    //     MeshMaterial3d(red_material.clone()),
+    //     Transform {
+    //         translation: Vec3::new(3.0, -2.0, 0.0),
+    //         rotation: Quat::from_euler(EulerRot::YXZEx, FRAC_PI_4, FRAC_PI_4, 0.0),
+    //         ..default()
+    //     },
+    // ));
 }

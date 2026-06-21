@@ -6,3 +6,6 @@ edition = "2024"
 [dependencies]
 bevy = { workspace = true }
 bevy_dev_tools = { workspace = true }
+orion-voxels = {workspace = true}
+orion-mesh = {workspace = true}
+orion-sdf = {workspace = true}

@@ -3737,11 +3737,19 @@ version = "0.1.0"
 dependencies = [
  "bevy",
  "bevy_dev_tools",
+ "orion-mesh",
+ "orion-sdf",
+ "orion-voxels",
 ]
 
 [[package]]
 name = "orion-mesh"
 version = "0.1.0"
+dependencies = [
+ "bevy",
+ "ndshape",
+ "orion-voxels",
+]
 
 [[package]]
 name = "orion-renderer"

@@ -11,18 +11,20 @@ pub struct OrionVoxelGrid {
 
 impl OrionVoxelGrid {
     pub fn new(voxel_array_size: u32, voxel_grid_size: f32, coord: IVec3, sdf: &impl SDF) -> OrionVoxelGrid {
+        let base_array_size = voxel_array_size;
+        let voxel_array_size = voxel_array_size + 2;
+
         let mut data = Vec::with_capacity((voxel_array_size * voxel_array_size * voxel_array_size) as usize);
 
         let voxel_grid_offset = coord.as_vec3() * voxel_grid_size;
 
-        let voxel_scale = voxel_grid_size / voxel_array_size as f32;
-        let half_voxel_offset = Vec3::splat(voxel_scale * 0.5);
+        let voxel_scale = voxel_grid_size / base_array_size as f32;
 
-        for x in 0..voxel_array_size {
+        for z in 0..voxel_array_size {
             for y in 0..voxel_array_size {
-                for z in 0..voxel_array_size {
+                for x in 0..voxel_array_size {
                     let voxel_relative_position = UVec3::new(x, y, z);
-                    let voxel_position = voxel_grid_offset + voxel_relative_position.as_vec3() * voxel_scale + half_voxel_offset;
+                    let voxel_position = voxel_grid_offset + voxel_relative_position.as_vec3() * voxel_scale;
 
                     data.push(sdf.evaluate(voxel_position));
                 }
@@ -54,7 +56,7 @@ impl Plugin for OrionVoxelPlugin {
     fn build(&self, app: &mut App) {
         app.insert_resource(VoxelConfig {
             array_size: 32,
-            grid_size: 1.0,
+            grid_size: 4.0,
         });
     }
 }
