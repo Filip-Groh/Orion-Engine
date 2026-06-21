@@ -3727,6 +3727,7 @@ name = "orion-engine"
 version = "0.1.0"
 dependencies = [
  "bevy",
+ "bevy_dev_tools",
 ]
 
 [[package]]
