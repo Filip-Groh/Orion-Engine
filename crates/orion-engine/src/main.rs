@@ -4,6 +4,7 @@ mod free_cam;
 mod scene;
 mod fps_overlay;
 mod wireframe_view;
+mod hello_custom_triangle;
 
 use bevy::prelude::*;
 use bevy::render::RenderPlugin;
@@ -16,27 +17,38 @@ use orion_voxels::{OrionVoxelGrid, OrionVoxelPlugin, VoxelConfig};
 use crate::fps_overlay::FPSOverlayPlugin;
 use crate::free_cam::CameraPlugin;
 use crate::hello_cube::HelloCube;
+use crate::hello_custom_triangle::HelloTrianglePlugin;
 use crate::hello_triangle::HelloTriangle;
 use crate::scene::ScenePlugin;
 use crate::wireframe_view::WireframeViewPlugin;
 
 fn main() {
     App::new()
-        .add_plugins(DefaultPlugins.set(RenderPlugin {
-            render_creation: WgpuSettings {
-                features: WgpuFeatures::POLYGON_MODE_LINE,
-                ..default()
-            }
-                .into(),
-            ..default()
-        }))
+        .add_plugins(
+            DefaultPlugins
+                // 1. Configure the RenderPlugin for wireframe/line mode
+                .set(RenderPlugin {
+                    render_creation: WgpuSettings {
+                        features: WgpuFeatures::POLYGON_MODE_LINE,
+                        ..default()
+                    }
+                        .into(),
+                    ..default()
+                })
+                // 2. Configure the AssetPlugin for workspace relative paths
+                .set(AssetPlugin {
+                    file_path: "../../assets".to_string(),
+                    ..default()
+                }),
+        )
         .add_plugins(CameraPlugin)
         .add_plugins(ScenePlugin)
         .add_plugins(FPSOverlayPlugin)
         .add_plugins(WireframeViewPlugin)
-        .add_plugins(OrionVoxelPlugin)
-        .add_plugins(OrionMeshPlugin)
-        .add_systems(Startup, setup_sdf)
+        // .add_plugins(OrionVoxelPlugin)
+        // .add_plugins(OrionMeshPlugin)
+        .add_plugins(HelloTrianglePlugin)
+        // .add_systems(Startup, setup_sdf)
         .run();
 }
 

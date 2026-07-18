@@ -1,0 +1,13 @@
+[package]
+name = "orion-shader"
+version = "0.1.0"
+edition = "2024"
+
+[lib]
+crate-type = ["lib", "cdylib"]
+
+[lints.rust]
+unexpected_cfgs = { level = "allow", check-cfg = ['cfg(target_arch, values("spirv"))'] }
+
+[dependencies]
+spirv-std = { workspace = true }
