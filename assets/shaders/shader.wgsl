@@ -1,41 +1,25 @@
-#import bevy_pbr::mesh_functions::{get_world_from_local, mesh_position_local_to_clip}
-
-@group(3) @binding(0) var<uniform> material_color: vec4<f32>;
-
-struct VertexInput {
-    @builtin(instance_index) instance_index: u32,
-    @location(0) position: vec3<f32>,
-    @location(1) normal: vec3<f32>,
-    @location(2) uv: vec2<f32>,
-};
+@group(0) @binding(0) var screen_texture: texture_2d<f32>;
+@group(0) @binding(1) var texture_sampler: sampler;
+@group(0) @binding(2) var<uniform> tint: vec4<f32>;
 
 struct VertexOutput {
-    @builtin(position) clip_position: vec4<f32>,
+    @builtin(position) position: vec4<f32>,
     @location(0) uv: vec2<f32>,
 };
 
 @vertex
-fn vertex(vertex: VertexInput) -> VertexOutput {
-    var out: VertexOutput;
-
-    out.clip_position = mesh_position_local_to_clip(
-        get_world_from_local(vertex.instance_index),
-        vec4<f32>(vertex.position * 0.9, 1.0)
-    );
-
-    out.uv = vertex.uv;
-
-    return out;
+fn vertex(@builtin(vertex_index) vertex_index: u32) -> VertexOutput {
+    // Generates a triangle covering the entire clip space (-1 to 3)
+    let uv = vec2<f32>(f32((vertex_index << 1u) & 2u), f32(vertex_index & 2u));
+    let out_pos = vec4<f32>(uv * 2.0 - 1.0, 0.0, 1.0);
+    return VertexOutput(out_pos, vec2<f32>(uv.x, 1.0 - uv.y));
 }
 
 @fragment
-fn fragment(mesh: VertexOutput) -> @location(0) vec4<f32> {
-    let center_uv = mesh.uv - vec2<f32>(0.5, 0.5);
+fn fragment(in: VertexOutput) -> @location(0) vec4<f32> {
+    let sampled = textureSample(screen_texture, texture_sampler, in.uv);
 
-    let dist_from_center = length(center_uv);
-    
-    let glow_intensity = smoothstep(0.2, 0.6, dist_from_center);
-    let glow_color = vec4<f32>(1.0, 0.4, 0.0, 1.0);
+    let blended_rgb = mix(sampled.rgb, tint.rgb, tint.a);
 
-    return mix(material_color, glow_color, glow_intensity);
+    return vec4<f32>(blended_rgb, sampled.a);
 }

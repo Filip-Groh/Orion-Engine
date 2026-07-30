@@ -2,19 +2,25 @@
 resolver = "2"
 members = [
     "crates/orion-engine",
-    "crates/orion-mesh",
     "crates/orion-sdf",
-    "crates/orion-shader",
-    "crates/orion-voxels"
+    "crates/orion-shader"
 ]
 
 [workspace.dependencies]
 orion-sdf = {path = "crates/orion-sdf"}
-orion-voxels = {path = "crates/orion-voxels"}
-orion-mesh = {path = "crates/orion-mesh"}
 
-bevy = { version = "0.19.0", features = ["default", "shader_format_spirv"] }
-bevy_dev_tools = "0.19.0"
+bevy = { version = "0.19.0", default-features = false, features = [
+    "shader_format_spirv",
+    "bevy_window",
+    "bevy_winit",
+    "bevy_render",
+    "bevy_camera",
+    "bevy_asset",
+    "bevy_mesh",
+    "bevy_input_focus",
+    "bevy_log",
+    "debug"
+] }
 ndshape = "0.3.0"
 spirv-builder = "=0.10.0-alpha.1"
 spirv-std = "=0.10.0-alpha.1"

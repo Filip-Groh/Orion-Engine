@@ -1,9 +1,0 @@
-[package]
-name = "orion-mesh"
-version = "0.1.0"
-edition = "2024"
-
-[dependencies]
-bevy = {workspace = true}
-orion-voxels = {workspace = true}
-ndshape = {workspace = true}
