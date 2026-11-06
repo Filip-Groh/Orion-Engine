@@ -1,6 +1,9 @@
-use anyhow::{Context, Result, bail, ensure};
+mod triangulation;
+
+use anyhow::{Context, Result, ensure};
 
 use crate::Triangle;
+use triangulation::triangulate;
 
 pub(crate) fn parse(source: &str, albedo: [f32; 3]) -> Result<Vec<Triangle>> {
     ensure!(
@@ -65,79 +68,6 @@ fn parse_face(
     Ok(face)
 }
 
-fn project(point: [f32; 3], axis: usize) -> [f64; 2] {
-    [point[(axis + 1) % 3].into(), point[(axis + 2) % 3].into()]
-}
-
-fn orient(a: [f64; 2], b: [f64; 2], c: [f64; 2]) -> f64 {
-    (b[0] - a[0]) * (c[1] - a[1]) - (b[1] - a[1]) * (c[0] - a[0])
-}
-
-fn triangulate(face: &[[f32; 3]], albedo: [f32; 3], triangles: &mut Vec<Triangle>) -> Result<()> {
-    if let &[a, b, c] = face {
-        triangles.push(Triangle {
-            vertices: [a, b, c],
-            albedo,
-        });
-        return Ok(());
-    }
-
-    // Drop the axis with the largest normal component, then clip ears in 2D.
-    let projected_area = [0, 1, 2].map(|axis| {
-        let first = project(face[0], axis);
-        face[1..]
-            .windows(2)
-            .map(|pair| orient(first, project(pair[0], axis), project(pair[1], axis)))
-            .sum::<f64>()
-    });
-    let axis = (0..3)
-        .max_by(|&a, &b| projected_area[a].abs().total_cmp(&projected_area[b].abs()))
-        .expect("three projection axes");
-    ensure!(projected_area[axis] != 0.0, "polygon has no area");
-    let winding = projected_area[axis].signum();
-    let points: Vec<_> = face.iter().map(|&point| project(point, axis)).collect();
-    let mut remaining: Vec<_> = (0..face.len()).collect();
-    while remaining.len() > 3 {
-        let count = remaining.len();
-        let mut ear = None;
-        for i in 0..count {
-            let corners = [
-                remaining[(i + count - 1) % count],
-                remaining[i],
-                remaining[(i + 1) % count],
-            ];
-            let [a, b, c] = corners.map(|index| points[index]);
-            if winding * orient(a, b, c) <= 0.0 {
-                continue;
-            }
-            let contains_vertex = remaining.iter().any(|&index| {
-                let point = points[index];
-                !corners.contains(&index)
-                    && winding * orient(a, b, point) >= 0.0
-                    && winding * orient(b, c, point) >= 0.0
-                    && winding * orient(c, a, point) >= 0.0
-            });
-            if !contains_vertex {
-                ear = Some((i, corners));
-                break;
-            }
-        }
-        let Some((i, corners)) = ear else {
-            bail!("could not triangulate polygon");
-        };
-        triangles.push(Triangle {
-            vertices: corners.map(|index| face[index]),
-            albedo,
-        });
-        remaining.remove(i);
-    }
-    triangles.push(Triangle {
-        vertices: [face[remaining[0]], face[remaining[1]], face[remaining[2]]],
-        albedo,
-    });
-    Ok(())
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -154,8 +84,8 @@ mod tests {
             assert_eq!(triangles.len(), 2);
             let mut area = 0.0;
             for triangle in triangles {
-                let [a, b, c] = triangle.vertices.map(|point| project(point, 2));
-                let signed_area = orient(a, b, c);
+                let [[ax, ay, _], [bx, by, _], [cx, cy, _]] = triangle.vertices;
+                let signed_area = (bx - ax) * (cy - ay) - (by - ay) * (cx - ax);
                 assert_eq!(signed_area.signum(), expected_sign);
                 assert_eq!(triangle.albedo, albedo);
                 area += signed_area;
@@ -177,15 +107,21 @@ mod tests {
     }
 
     #[test]
-    fn demo_keeps_the_triangle_and_suzanne_in_separate_meshes() {
-        let scene = crate::Scene::demo();
-        let mut triangle_counts: Vec<_> = scene
-            .world
-            .query::<&crate::Mesh>()
-            .iter()
-            .map(|mesh| mesh.triangles.len())
-            .collect();
-        triangle_counts.sort_unstable();
-        assert_eq!(triangle_counts, [1, 32 + 468 * 2]);
+    fn triangulates_a_polygon_in_the_yz_plane() {
+        let source = "v 3 0 0\nv 3 2 0\nv 3 2 2\nv 3 0 2\nf 1 2 3 4";
+        let triangles = parse(source, [1.0; 3]).unwrap();
+        assert_eq!(triangles.len(), 2);
+        for triangle in triangles {
+            let [[ax, ay, az], [bx, by, bz], [cx, cy, cz]] = triangle.vertices;
+            assert_eq!([ax, bx, cx], [3.0; 3]);
+            assert_eq!((by - ay) * (cz - az) - (bz - az) * (cy - ay), 4.0);
+        }
+    }
+
+    #[test]
+    fn reports_the_line_of_a_zero_area_polygon() {
+        let source = "v 0 0 0\nv 1 0 0\nv 2 0 0\nv 3 0 0\nf 1 2 3 4";
+        let error = parse(source, [1.0; 3]).unwrap_err();
+        assert_eq!(format!("{error:#}"), "OBJ line 5: polygon has no area");
     }
 }

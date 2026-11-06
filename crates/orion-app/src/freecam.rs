@@ -97,37 +97,47 @@ impl Freecam {
 
     /// Advances held movement to the current time.
     pub fn step(&mut self, camera: &mut Camera) {
+        self.step_at(camera, Instant::now());
+    }
+
+    fn step_at(&mut self, camera: &mut Camera, now: Instant) {
         let Some(previous) = self.last_step else {
             return;
         };
-        let now = Instant::now();
         self.last_step = Some(now);
         let dt = (now - previous).as_secs_f32().min(0.1);
-        let [strafe, rise, advance] = self.axes();
         let forward = self.forward();
-        let (sin_yaw, cos_yaw) = self.yaw.sin_cos();
-        let movement = [
-            strafe * cos_yaw + advance * forward[0],
-            rise + advance * forward[1],
-            strafe * sin_yaw + advance * forward[2],
-        ];
+        let movement = self.movement(forward);
         let length = movement
             .iter()
             .map(|component| component * component)
             .sum::<f32>()
             .sqrt();
-        let boosted =
-            self.keys.contains(&KeyCode::ShiftLeft) || self.keys.contains(&KeyCode::ShiftRight);
-        let speed = if boosted {
-            MOVE_SPEED * BOOST_MULTIPLIER
-        } else {
-            MOVE_SPEED
-        };
-        let scale = speed * dt / length.max(1.0);
+        let scale = self.speed() * dt / length.max(1.0);
         for (coordinate, direction) in camera.eye.iter_mut().zip(movement) {
             *coordinate += direction * scale;
         }
         Self::aim(camera, forward);
+    }
+
+    fn movement(&self, forward: [f32; 3]) -> [f32; 3] {
+        let [strafe, rise, advance] = self.axes();
+        let (sin_yaw, cos_yaw) = self.yaw.sin_cos();
+        [
+            strafe * cos_yaw + advance * forward[0],
+            rise + advance * forward[1],
+            strafe * sin_yaw + advance * forward[2],
+        ]
+    }
+
+    fn speed(&self) -> f32 {
+        let boosted =
+            self.keys.contains(&KeyCode::ShiftLeft) || self.keys.contains(&KeyCode::ShiftRight);
+        if boosted {
+            MOVE_SPEED * BOOST_MULTIPLIER
+        } else {
+            MOVE_SPEED
+        }
     }
 
     fn axes(&self) -> [f32; 3] {
@@ -152,3 +162,6 @@ impl Freecam {
         camera.target = std::array::from_fn(|i| camera.eye[i] + forward[i]);
     }
 }
+
+#[cfg(test)]
+mod tests;

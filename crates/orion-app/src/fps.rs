@@ -11,7 +11,10 @@ pub(crate) struct FpsCounter {
 
 impl FpsCounter {
     pub fn presented(&mut self) {
-        let now = Instant::now();
+        self.presented_at(Instant::now());
+    }
+
+    fn presented_at(&mut self, now: Instant) {
         let Some(start) = self.sample_start else {
             self.sample_start = Some(now);
             return;
@@ -40,5 +43,24 @@ impl FpsCounter {
             egui::Color32::from_black_alpha(192),
         );
         painter.galley(origin + padding, text, egui::Color32::WHITE);
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn samples_presented_frames_over_elapsed_time_and_starts_a_new_window() {
+        let mut counter = FpsCounter::default();
+        let start = Instant::now();
+        counter.presented_at(start);
+        counter.presented_at(start + Duration::from_millis(250));
+        assert_eq!(counter.fps, None);
+
+        counter.presented_at(start + SAMPLE_INTERVAL);
+        assert_eq!(counter.fps, Some(4.0));
+        counter.presented_at(start + Duration::from_millis(1_500));
+        assert_eq!(counter.fps, Some(1.0));
     }
 }
