@@ -1,23 +1,26 @@
 use anyhow::{Context, Result, ensure};
 
-use crate::Triangle;
+use crate::{Mesh, texture::ImportedMaterial};
+
+use super::Corner;
 
 type Point = [f64; 2];
 
 pub(super) fn triangulate(
-    face: &[[f32; 3]],
-    albedo: [f32; 3],
-    triangles: &mut Vec<Triangle>,
+    face: &[Corner],
+    material: ImportedMaterial,
+    mesh: &mut Mesh,
 ) -> Result<()> {
-    let mut emit = |corners: [usize; 3]| {
-        triangles.push(Triangle {
-            vertices: corners.map(|index| face[index]),
-            albedo,
-        });
+    let mut emit = |indices: [usize; 3]| {
+        let corners = indices.map(|index| face[index]);
+        let uvs = match corners.map(|corner| corner.uv) {
+            [Some(a), Some(b), Some(c)] => Some([a, b, c]),
+            _ => None,
+        };
+        mesh.push_triangle(corners.map(|corner| corner.position), material, uvs, None)
     };
     if face.len() == 3 {
-        emit([0, 1, 2]);
-        return Ok(());
+        return emit([0, 1, 2]);
     }
 
     let (points, winding) = project_polygon(face)?;
@@ -25,27 +28,35 @@ pub(super) fn triangulate(
     while remaining.len() > 3 {
         let (index, corners) =
             find_ear(&points, winding, &remaining).context("could not triangulate polygon")?;
-        emit(corners);
+        emit(corners)?;
         remaining.remove(index);
     }
-    emit([remaining[0], remaining[1], remaining[2]]);
-    Ok(())
+    emit([remaining[0], remaining[1], remaining[2]])
 }
 
-fn project_polygon(face: &[[f32; 3]]) -> Result<(Vec<Point>, f64)> {
+fn project_polygon(face: &[Corner]) -> Result<(Vec<Point>, f64)> {
     // Drop the axis with the largest normal component to clip ears in 2D.
     let areas = [0, 1, 2].map(|axis| {
-        let first = project(face[0], axis);
+        let first = project(face[0].position, axis);
         face[1..]
             .windows(2)
-            .map(|pair| orient(first, project(pair[0], axis), project(pair[1], axis)))
+            .map(|pair| {
+                orient(
+                    first,
+                    project(pair[0].position, axis),
+                    project(pair[1].position, axis),
+                )
+            })
             .sum::<f64>()
     });
     let axis = (0..3)
         .max_by(|&a, &b| areas[a].abs().total_cmp(&areas[b].abs()))
         .expect("three projection axes");
     ensure!(areas[axis] != 0.0, "polygon has no area");
-    let points = face.iter().map(|&point| project(point, axis)).collect();
+    let points = face
+        .iter()
+        .map(|corner| project(corner.position, axis))
+        .collect();
     Ok((points, areas[axis].signum()))
 }
 

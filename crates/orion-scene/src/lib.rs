@@ -4,6 +4,7 @@ mod demo;
 mod glb;
 mod obj;
 mod snapshot;
+mod texture;
 
 use std::{fs, path::Path};
 
@@ -11,6 +12,14 @@ use anyhow::{Context, Result};
 pub use hecs::{Entity, World};
 use serde::{Deserialize, Serialize};
 pub use snapshot::SceneSnapshot;
+pub use texture::{MaterialMaps, Texture, TriangleUvs, WrapMode};
+
+/// Perceptual roughness for imported geometry and older checkpoints.
+pub const DEFAULT_ROUGHNESS: f32 = 0.55;
+
+fn default_roughness() -> f32 {
+    DEFAULT_ROUGHNESS
+}
 
 /// A perspective camera with +Y as world up.
 #[derive(Clone, Copy, Debug, Serialize, Deserialize)]
@@ -24,8 +33,14 @@ pub struct Camera {
 pub struct Sphere {
     pub center: [f32; 3],
     pub radius: f32,
-    /// Linear RGB reflectance, with each component in `0.0..=1.0`.
+    /// Linear RGB base color, with each component in `0.0..=1.0`.
     pub albedo: [f32; 3],
+    /// Metallic fraction in `0.0..=1.0`.
+    #[serde(default)]
+    pub metallic: f32,
+    /// Perceptual roughness in `0.0..=1.0`.
+    #[serde(default = "default_roughness")]
+    pub roughness: f32,
 }
 
 /// The rest height and vertical amplitude of a sine-wave animation.
@@ -39,18 +54,31 @@ pub struct SineBob {
 pub struct Triangle {
     /// World-space vertices in counterclockwise order as seen from the front.
     pub vertices: [[f32; 3]; 3],
-    /// Linear RGB reflectance, with each component in `0.0..=1.0`.
+    /// Linear RGB base color, with each component in `0.0..=1.0`.
     pub albedo: [f32; 3],
+    /// Metallic fraction in `0.0..=1.0`.
+    #[serde(default)]
+    pub metallic: f32,
+    /// Perceptual roughness in `0.0..=1.0`.
+    #[serde(default = "default_roughness")]
+    pub roughness: f32,
+    /// Index of the triangle's UVs in its mesh.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub uv_index: Option<u32>,
 }
 
 /// One mesh object, represented by its world-space triangles.
-#[derive(Clone, Debug, Serialize, Deserialize)]
+#[derive(Clone, Debug, Default, Serialize, Deserialize)]
 pub struct Mesh {
     pub triangles: Vec<Triangle>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub uvs: Vec<TriangleUvs>,
 }
 
 pub struct Scene {
     pub world: World,
+    /// Texture images and samplers referenced by mesh material maps.
+    pub textures: Vec<Texture>,
     /// The entity whose `Camera` component is used for rendering.
     pub active_camera: Entity,
 }
@@ -61,6 +89,7 @@ impl Scene {
         let active_camera = world.spawn((camera,));
         Self {
             world,
+            textures: Vec::new(),
             active_camera,
         }
     }
@@ -79,23 +108,26 @@ impl Scene {
     }
 
     /// Spawns a Wavefront OBJ as one mesh entity in its original coordinates and winding.
-    /// The renderer uses the supplied albedo and computes flat normals from the faces.
+    /// Faces use their MTL materials when present, the supplied fallback color, and flat normals.
     pub fn import_obj(&mut self, path: impl AsRef<Path>, albedo: [f32; 3]) -> Result<Entity> {
         let path = path.as_ref();
         let source =
             fs::read_to_string(path).with_context(|| format!("read {}", path.display()))?;
-        let triangles =
-            obj::parse(&source, albedo).with_context(|| format!("import {}", path.display()))?;
-        Ok(self.world.spawn((Mesh { triangles },)))
+        let (mesh, textures) = obj::parse(&source, albedo, path.parent(), self.textures.len())
+            .with_context(|| format!("import {}", path.display()))?;
+        self.textures.extend(textures);
+        Ok(self.world.spawn((mesh,)))
     }
 
     /// Spawns the static triangle geometry of a binary glTF asset as one mesh entity.
-    /// Node transforms are baked into world-space positions and faces use the supplied albedo.
+    /// Node transforms are baked into world-space positions. The supplied color is used for
+    /// primitives without a material.
     pub fn import_glb(&mut self, path: impl AsRef<Path>, albedo: [f32; 3]) -> Result<Entity> {
         let path = path.as_ref();
         let source = fs::read(path).with_context(|| format!("read {}", path.display()))?;
-        let triangles =
-            glb::parse(&source, albedo).with_context(|| format!("import {}", path.display()))?;
-        Ok(self.world.spawn((Mesh { triangles },)))
+        let (mesh, textures) = glb::parse(&source, albedo, path.parent(), self.textures.len())
+            .with_context(|| format!("import {}", path.display()))?;
+        self.textures.extend(textures);
+        Ok(self.world.spawn((mesh,)))
     }
 }

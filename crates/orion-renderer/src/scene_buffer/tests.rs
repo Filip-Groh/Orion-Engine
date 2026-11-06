@@ -1,5 +1,5 @@
 use bytemuck::pod_read_unaligned;
-use orion_scene::Scene;
+use orion_scene::{DEFAULT_ROUGHNESS, Scene, Texture, TriangleUvs, WrapMode};
 
 use super::*;
 use crate::{TransformSnapshot, Wireframes};
@@ -42,18 +42,25 @@ fn packs_the_active_camera_and_current_world_geometry() {
         center: [0.0; 3],
         radius: 1.0,
         albedo: [1.0; 3],
+        metallic: 0.0,
+        roughness: DEFAULT_ROUGHNESS,
     },));
     let triangle = Triangle {
         vertices: [[0.0, 0.0, 0.0], [1.0, 0.0, 0.0], [0.0, 1.0, 0.0]],
         albedo: [1.0; 3],
+        metallic: 0.0,
+        roughness: DEFAULT_ROUGHNESS,
+        uv_index: None,
     };
     let mesh = scene.world.spawn((Mesh {
         triangles: vec![triangle],
+        ..Mesh::default()
     },));
     let other_mesh = scene.world.spawn((Mesh {
         triangles: vec![triangle; 3],
+        ..Mesh::default()
     },));
-    scene.world.spawn((Mesh { triangles: vec![] },));
+    scene.world.spawn((Mesh::default(),));
 
     let header_size = size_of::<SceneHeader>();
     let bytes = pack_scene(SceneFrame::new(&scene), EXTENT, false, 1024).unwrap();
@@ -89,35 +96,62 @@ fn packs_the_active_camera_and_current_world_geometry() {
 #[test]
 fn packs_geometry_in_shader_order_and_respects_the_exact_buffer_limit() {
     let mut scene = empty_scene();
+    scene.textures.push(Texture {
+        width: 2,
+        height: 1,
+        texels: vec![[255, 0, 0, 255], [0, 255, 0, 255]],
+        wrap_u: WrapMode::Clamp,
+        wrap_v: WrapMode::Mirror,
+        linear_filter: true,
+        scale: [1.0; 2],
+        offset: [0.0; 2],
+    });
     scene.world.spawn((Sphere {
         center: [1.0, 2.0, 3.0],
         radius: 0.5,
         albedo: [1.0, 0.5, 0.25],
+        metallic: 0.5,
+        roughness: 1.0,
     },));
     scene.world.spawn((Mesh {
         triangles: vec![Triangle {
             vertices: [[-1.0, 2.0, 3.0], [4.0, 2.0, 3.0], [-1.0, 5.0, 3.0]],
             albedo: [0.25, 0.5, 1.0],
+            metallic: 1.0,
+            roughness: 0.25,
+            uv_index: Some(0),
+        }],
+        uvs: vec![TriangleUvs {
+            primary: [[0.0, 0.0], [1.0, 0.0], [0.0, 1.0]],
+            metallic_roughness: None,
+            maps: MaterialMaps {
+                base_color: Some(0),
+                ..MaterialMaps::default()
+            },
         }],
     },));
 
-    let bytes = pack_scene(SceneFrame::new(&scene), EXTENT, true, 192).unwrap();
-    assert_eq!(bytes.len(), 192);
+    let bytes = pack_scene(SceneFrame::new(&scene), EXTENT, true, 304).unwrap();
+    assert_eq!(bytes.len(), 304);
     let header: SceneHeader = pod_read_unaligned(&bytes[..64]);
     assert_eq!(header.extent_format, [960, 540, 1, 0]);
     assert_eq!(header.geometry_counts, [1, 1, 1, 0]);
-    let sphere: [f32; 8] = pod_read_unaligned(&bytes[64..96]);
-    assert_eq!(sphere, [1.0, 2.0, 3.0, 0.5, 1.0, 0.5, 0.25, 0.0]);
-    let triangle: [[f32; 4]; 4] = pod_read_unaligned(&bytes[96..160]);
+    let sphere: GpuSphere = pod_read_unaligned(&bytes[64..96]);
+    assert_eq!(sphere.center_radius, [1.0, 2.0, 3.0, 0.5]);
+    assert_eq!(sphere.material[..3], [1.0_f32, 0.5, 0.25].map(f32::to_bits));
+    assert_eq!(sphere.material[3], 0xffff_8000);
+    let triangle: GpuTriangle = pod_read_unaligned(&bytes[96..160]);
     assert_eq!(
-        triangle,
-        [
-            [-1.0, 2.0, 3.0, 0.0],
-            [4.0, 2.0, 3.0, 0.0],
-            [-1.0, 5.0, 3.0, 0.0],
-            [0.25, 0.5, 1.0, 0.0],
-        ]
+        triangle.vertices.map(|[x, y, z, _]| [x, y, z]),
+        [[-1.0_f32, 2.0, 3.0], [4.0, 2.0, 3.0], [-1.0, 5.0, 3.0],]
+            .map(|vertex| vertex.map(f32::to_bits))
     );
+    assert_eq!(triangle.vertices[0][3], 1);
+    assert_eq!(
+        triangle.material[..3],
+        [0.25_f32, 0.5, 1.0].map(f32::to_bits)
+    );
+    assert_eq!(triangle.material[3], 0x4000_ffff);
     let bounds: [u32; 8] = pod_read_unaligned(&bytes[160..192]);
     assert_eq!(
         bounds,
@@ -132,7 +166,17 @@ fn packs_geometry_in_shader_order_and_respects_the_exact_buffer_limit() {
             1,
         ]
     );
-    let error = pack_scene(SceneFrame::new(&scene), EXTENT, true, 191).unwrap_err();
+    let uv: [f32; 12] = pod_read_unaligned(&bytes[192..240]);
+    assert_eq!(
+        uv,
+        [0.0, 0.0, 1.0, 0.0, 0.0, 1.0, 0.0, 0.0, 1.0, 0.0, 0.0, 1.0]
+    );
+    let maps: [u32; 4] = pod_read_unaligned(&bytes[240..256]);
+    assert_eq!(maps, [12, 0, 0, 0]);
+    let sampler: [u32; 4] = pod_read_unaligned(&bytes[256..272]);
+    assert_eq!(sampler, [2, 1, 56, 25]);
+    assert_eq!(&bytes[288..296], &[255, 0, 0, 255, 0, 255, 0, 255]);
+    let error = pack_scene(SceneFrame::new(&scene), EXTENT, true, 303).unwrap_err();
     assert_eq!(
         error.to_string(),
         "scene exceeds the device's storage buffer limit"
@@ -155,7 +199,11 @@ fn rejects_a_vertical_camera_and_non_finite_triangle_vertices() {
         triangles: vec![Triangle {
             vertices: [[f32::NAN, 0.0, 0.0], [1.0, 0.0, 0.0], [0.0, 1.0, 0.0]],
             albedo: [1.0; 3],
+            metallic: 0.0,
+            roughness: DEFAULT_ROUGHNESS,
+            uv_index: None,
         }],
+        ..Mesh::default()
     },));
     let error = pack_scene(SceneFrame::new(&scene), EXTENT, false, 1024).unwrap_err();
     assert!(
@@ -172,6 +220,8 @@ fn interpolated_sphere_upload_blends_positions_without_mutating_the_scene() {
         center: [1.0, 2.0, 3.0],
         radius: 1.0,
         albedo: [1.0; 3],
+        metallic: 0.0,
+        roughness: DEFAULT_ROUGHNESS,
     },));
     let mut snapshot = TransformSnapshot::default();
     snapshot.capture(&scene).unwrap();
@@ -196,6 +246,8 @@ fn new_entities_and_camera_switches_use_current_transforms() {
         center: [1.0; 3],
         radius: 1.0,
         albedo: [1.0; 3],
+        metallic: 0.0,
+        roughness: DEFAULT_ROUGHNESS,
     },));
     let mut snapshot = TransformSnapshot::default();
     snapshot.capture(&scene).unwrap();
@@ -204,6 +256,8 @@ fn new_entities_and_camera_switches_use_current_transforms() {
         center: [3.0; 3],
         radius: 1.0,
         albedo: [1.0; 3],
+        metallic: 0.0,
+        roughness: DEFAULT_ROUGHNESS,
     },));
     scene.active_camera = scene.world.spawn((Camera {
         eye: [1.0, 2.0, 3.0],

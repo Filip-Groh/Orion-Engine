@@ -2,7 +2,7 @@ use anyhow::{Context, Result, ensure};
 use hecs::{EntityBuilder, EntityRef};
 use serde::{Deserialize, Serialize};
 
-use crate::{Camera, Entity, Mesh, Scene, SineBob, Sphere, World};
+use crate::{Camera, Entity, Mesh, Scene, SineBob, Sphere, Texture, World};
 
 /// A self-contained copy of a scene. References use indices into the saved entities.
 #[derive(Serialize, Deserialize)]
@@ -10,6 +10,8 @@ use crate::{Camera, Entity, Mesh, Scene, SineBob, Sphere, World};
 pub struct SceneSnapshot {
     active_camera: usize,
     entities: Vec<SavedEntity>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    textures: Vec<Texture>,
 }
 
 #[derive(Serialize, Deserialize)]
@@ -35,6 +37,7 @@ impl SceneSnapshot {
         Ok(Self {
             active_camera: active_camera.context("active camera was missing from the snapshot")?,
             entities,
+            textures: scene.textures.clone(),
         })
     }
 
@@ -56,6 +59,7 @@ impl SceneSnapshot {
         }
         Ok(Scene {
             world,
+            textures: self.textures,
             active_camera: active_camera.expect("active camera index was validated"),
         })
     }

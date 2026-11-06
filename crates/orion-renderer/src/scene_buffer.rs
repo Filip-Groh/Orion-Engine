@@ -1,7 +1,10 @@
 use anyhow::{Result, ensure};
 use ash::vk;
 use bytemuck::{Pod, Zeroable, bytes_of, cast_slice};
-use orion_scene::{Camera, Entity, Mesh, Scene, Sphere, Triangle};
+use orion_scene::{Camera, Entity, MaterialMaps, Mesh, Scene, Sphere, Triangle};
+
+mod textures;
+use textures::{GpuUvs, TextureLayout};
 
 use crate::{
     SceneFrame,
@@ -29,7 +32,7 @@ impl SceneStats {
     }
 }
 
-// The WGSL geometry array follows the header in sphere, triangle, BVH node order.
+// Spheres, triangles, BVH nodes, triangle UVs, texture descriptors, then texture texels.
 #[repr(C)]
 #[derive(Clone, Copy, Pod, Zeroable)]
 struct SceneHeader {
@@ -43,14 +46,14 @@ struct SceneHeader {
 #[derive(Clone, Copy, Pod, Zeroable)]
 struct GpuSphere {
     center_radius: [f32; 4],
-    albedo: [f32; 4],
+    material: [u32; 4],
 }
 
 #[repr(C)]
 #[derive(Clone, Copy, Pod, Zeroable)]
 struct GpuTriangle {
-    vertices: [[f32; 4]; 3],
-    albedo: [f32; 4],
+    vertices: [[u32; 4]; 3],
+    material: [u32; 4],
 }
 
 pub(super) fn pack_scene(
@@ -71,7 +74,25 @@ pub(super) fn pack_scene(
     let sphere_count = spheres.iter().len();
     let (mesh_count, triangle_count) = mesh_counts(meshes.iter());
     let node_count = bvh::node_count(mesh_count);
-    let size = scene_buffer_size(sphere_count, triangle_count, node_count, max_bytes)?;
+    let uv_count = meshes
+        .iter()
+        .filter(|mesh| !mesh.triangles.is_empty())
+        .flat_map(|mesh| &mesh.uvs)
+        .filter(|uv| uv.maps != MaterialMaps::default())
+        .count();
+    let geometry_bytes = sphere_count
+        .saturating_mul(size_of::<GpuSphere>())
+        .saturating_add(triangle_count.saturating_mul(size_of::<GpuTriangle>()))
+        .saturating_add(node_count.saturating_mul(size_of::<BvhNode>()));
+    let texture_start = geometry_bytes.saturating_add(uv_count.saturating_mul(size_of::<GpuUvs>()));
+    let textures = TextureLayout::new(&frame.scene.textures, texture_start)?;
+    // Pad to a whole vec4 and keep a single slot even when the scene is empty.
+    let payload_size = textures.end.saturating_add(15) / 16 * 16;
+    let size = size_of::<SceneHeader>().saturating_add(payload_size.max(16));
+    ensure!(
+        size <= max_bytes,
+        "scene exceeds the device's storage buffer limit"
+    );
     header.geometry_counts = [
         sphere_count as u32,
         triangle_count as u32,
@@ -89,12 +110,26 @@ pub(super) fn pack_scene(
         bytes.extend_from_slice(bytes_of(&GpuSphere::try_from(&sphere)?));
     }
     let mut leaves = Vec::with_capacity(mesh_count);
+    let mut packed_uvs = Vec::with_capacity(uv_count);
     let mut first_triangle = 0;
     for mesh in meshes.iter().filter(|mesh| !mesh.triangles.is_empty()) {
-        leaves.push(append_mesh(&mut bytes, mesh, first_triangle)?);
+        let uv_indices = mesh
+            .uvs
+            .iter()
+            .map(|&uv| -> Result<u32> {
+                if let Some(uv) = textures.pack_uvs(uv)? {
+                    packed_uvs.push(uv);
+                    return Ok(packed_uvs.len().try_into()?);
+                }
+                Ok(0)
+            })
+            .collect::<Result<Vec<_>>>()?;
+        leaves.push(append_mesh(&mut bytes, mesh, first_triangle, &uv_indices)?);
         first_triangle += mesh.triangles.len() as u32;
     }
     bytes.extend_from_slice(cast_slice(&bvh::build(&mut leaves)));
+    bytes.extend_from_slice(cast_slice(&packed_uvs));
+    textures.append(&mut bytes)?;
     bytes.resize(size, 0);
     Ok(bytes)
 }
@@ -132,26 +167,6 @@ impl SceneHeader {
     }
 }
 
-fn scene_buffer_size(
-    spheres: usize,
-    triangles: usize,
-    nodes: usize,
-    max_bytes: usize,
-) -> Result<usize> {
-    // The runtime array needs one vec4 even when the scene has no geometry.
-    let geometry_bytes = spheres
-        .saturating_mul(size_of::<GpuSphere>())
-        .saturating_add(triangles.saturating_mul(size_of::<GpuTriangle>()))
-        .saturating_add(nodes.saturating_mul(size_of::<BvhNode>()))
-        .max(size_of::<[f32; 4]>());
-    let header_bytes = size_of::<SceneHeader>();
-    ensure!(
-        geometry_bytes <= max_bytes.saturating_sub(header_bytes),
-        "scene exceeds the device's storage buffer limit"
-    );
-    Ok(header_bytes + geometry_bytes)
-}
-
 impl TryFrom<&Sphere> for GpuSphere {
     type Error = anyhow::Error;
 
@@ -162,14 +177,13 @@ impl TryFrom<&Sphere> for GpuSphere {
                 && sphere
                     .center
                     .iter()
-                    .all(|coordinate| coordinate.is_finite())
-                && valid_albedo(sphere.albedo),
-            "spheres require a finite center, a positive finite radius, and albedo in 0..=1"
+                    .all(|coordinate| coordinate.is_finite()),
+            "spheres require a finite center and a positive finite radius"
         );
         let [x, y, z] = sphere.center;
         Ok(Self {
             center_radius: [x, y, z, sphere.radius],
-            albedo: padded(sphere.albedo),
+            material: pack_material(sphere.albedo, sphere.metallic, sphere.roughness)?,
         })
     }
 }
@@ -183,21 +197,32 @@ impl TryFrom<&Triangle> for GpuTriangle {
                 .vertices
                 .iter()
                 .flatten()
-                .all(|coordinate| coordinate.is_finite())
-                && valid_albedo(triangle.albedo),
-            "triangles require finite vertices and albedo in 0..=1"
+                .all(|coordinate| coordinate.is_finite()),
+            "triangles require finite vertices"
         );
         Ok(Self {
-            vertices: triangle.vertices.map(padded),
-            albedo: padded(triangle.albedo),
+            vertices: triangle
+                .vertices
+                .map(|[x, y, z]| [x.to_bits(), y.to_bits(), z.to_bits(), 0]),
+            material: pack_material(triangle.albedo, triangle.metallic, triangle.roughness)?,
         })
     }
 }
 
-fn append_mesh(bytes: &mut Vec<u8>, mesh: &Mesh, first_triangle: u32) -> Result<BvhNode> {
+fn append_mesh(
+    bytes: &mut Vec<u8>,
+    mesh: &Mesh,
+    first_triangle: u32,
+    uv_indices: &[u32],
+) -> Result<BvhNode> {
     let mut leaf = BvhNode::new(first_triangle, mesh.triangles.len() as u32);
     for triangle in &mesh.triangles {
-        let gpu_triangle = GpuTriangle::try_from(triangle)?;
+        let mut gpu_triangle = GpuTriangle::try_from(triangle)?;
+        if let Some(index) = triangle.uv_index {
+            gpu_triangle.vertices[0][3] = *uv_indices
+                .get(index as usize)
+                .ok_or_else(|| anyhow::anyhow!("triangle UV index {index} is out of bounds"))?;
+        }
         for vertex in triangle.vertices {
             leaf.include(vertex);
         }
@@ -206,12 +231,18 @@ fn append_mesh(bytes: &mut Vec<u8>, mesh: &Mesh, first_triangle: u32) -> Result<
     Ok(leaf)
 }
 
-fn valid_albedo(albedo: [f32; 3]) -> bool {
-    albedo.into_iter().all(|color| (0.0..=1.0).contains(&color))
-}
-
-fn padded([x, y, z]: [f32; 3]) -> [f32; 4] {
-    [x, y, z, 0.0]
+fn pack_material(base_color: [f32; 3], metallic: f32, roughness: f32) -> Result<[u32; 4]> {
+    let [r, g, b] = base_color;
+    ensure!(
+        [r, g, b, metallic, roughness]
+            .into_iter()
+            .all(|value| (0.0..=1.0).contains(&value)),
+        "material base color, metallic, and roughness must be in 0..=1"
+    );
+    // The shader reads the last word with unpack2x16unorm.
+    let unorm16 = |value: f32| (value * f32::from(u16::MAX)).round() as u32;
+    let factors = unorm16(metallic) | (unorm16(roughness) << 16);
+    Ok([r.to_bits(), g.to_bits(), b.to_bits(), factors])
 }
 
 #[cfg(test)]

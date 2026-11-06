@@ -10,9 +10,11 @@ Use a recent stable Rust toolchain and a Vulkan 1.1 driver with graphics, comput
 cargo run
 ```
 
-The demo renders three spheres, the bundled Suzanne OBJ, and the chess set from `scene.glb` over a checkerboard plane, with a green triangle passing through the red sphere. Triangles are visible from the side where their vertices wind counterclockwise. The resizable window starts at a logical size of 960 × 540. The egui overlay in the top-left corner shows presented frames per second (FPS) and completed simulation ticks per second (TPS), sampled over roughly half-second intervals.
+The demo renders three spheres, the bundled Suzanne OBJ, and the textured lamp from `lamp.glb` over a checkerboard plane, with a green triangle passing through the red sphere. Triangles are visible from the side where their vertices wind counterclockwise. The resizable window starts at a logical size of 960 × 540. The egui overlay in the top-left corner shows presented frames per second (FPS) and completed simulation ticks per second (TPS), sampled over roughly half-second intervals.
 
-Pass an OBJ or GLB file to add its geometry to the demo scene. Orion triangulates OBJ polygon faces and uses the embedded geometry from a GLB's default scene, falling back to the first scene or to untransformed meshes if the asset has no scenes. GLB node transforms are baked into the imported triangles. Both formats use a uniform color and flat face normals. Prepare the mesh for a Y-up scene and place it in view of the demo camera.
+Pass an OBJ or GLB file to add it to the demo scene. Orion triangulates OBJ polygon faces and uses the embedded geometry from a GLB's default scene, falling back to the first scene or to untransformed meshes if the asset has no scenes. GLB node transforms are baked into the imported triangles. Both formats use flat face normals and interpolate texture coordinates across triangles. Prepare the mesh for a Y-up scene and place it in view of the demo camera.
+
+OBJ reads `mtllib` and `usemtl` for diffuse color (`Kd`), metallic (`Pm`), roughness (`Pr`), and their PNG or JPEG maps. Texture paths are relative to the material library. GLB reads base color and metallic-roughness factors and maps, with embedded images, data URIs, or relative PNG and JPEG paths. Texture sampling uses the base mip level with nearest or bilinear filtering. The renderer uses the supplied fallback color for geometry without a material.
 
 ```sh
 cargo run -- path/to/mesh.obj
@@ -33,7 +35,7 @@ Press **F5** to save the latest completed tick to `orion-quicksave.json` in the 
 cargo run -- --load orion-quicksave.json
 ```
 
-Checkpoints include the active camera, scene geometry, animation state, held controls, and queued input. Meshes are embedded in the file. Press **Esc** after loading if you want to release saved movement controls. The `snapshot` command runs the demo without input to an exact tick and saves it without opening a window. Add `--mesh path/to/mesh.glb` or `--mesh path/to/mesh.obj` to include a custom mesh. The existing `--obj` flag is an alias for `--mesh`.
+Checkpoints include the active camera, scene geometry, animation state, held controls, and queued input. Meshes and their textures are embedded in the file. Press **Esc** after loading if you want to release saved movement controls. The `snapshot` command runs the demo without input to an exact tick and saves it without opening a window. Add `--mesh path/to/mesh.glb` or `--mesh path/to/mesh.obj` to include a custom mesh. The existing `--obj` flag is an alias for `--mesh`.
 
 ```sh
 cargo run -- snapshot tick-1000.json --tick 1000

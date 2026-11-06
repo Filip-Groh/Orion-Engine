@@ -1,6 +1,6 @@
 use std::path::Path;
 
-use orion_scene::{Camera, Mesh, Scene, SceneSnapshot, SineBob, Sphere};
+use orion_scene::{Camera, DEFAULT_ROUGHNESS, Mesh, Scene, SceneSnapshot, SineBob, Sphere};
 
 fn camera() -> Camera {
     Camera {
@@ -36,7 +36,9 @@ fn obj_import_spawns_one_mesh_with_the_requested_albedo() {
     assert!(
         mesh.triangles
             .iter()
-            .all(|triangle| triangle.albedo == albedo)
+            .all(|triangle| triangle.albedo == albedo
+                && triangle.metallic == 0.0
+                && triangle.roughness == DEFAULT_ROUGHNESS)
     );
     assert_eq!(scene.world.query::<&Mesh>().iter().len(), 1);
 }
@@ -53,7 +55,16 @@ fn demo_includes_the_triangle_suzanne_and_bundled_glb() {
     triangle_counts.sort_unstable();
     assert_eq!(triangle_counts.first(), Some(&1));
     assert_eq!(triangle_counts.last(), Some(&968));
-    assert_eq!(triangle_counts.iter().sum::<usize>(), 1_499_072 + 968 + 1);
+    assert_eq!(triangle_counts.iter().sum::<usize>(), 10_203 + 968 + 1);
+    assert_eq!(scene.textures.len(), 2);
+    assert!(scene.world.query::<&Mesh>().iter().any(|mesh| {
+        mesh.triangles.iter().any(|triangle| {
+            triangle.uv_index.is_some_and(|index| {
+                let maps = mesh.uvs[index as usize].maps;
+                maps.base_color.is_some() && maps.metallic_roughness.is_some()
+            })
+        })
+    }));
 }
 
 #[test]
@@ -67,6 +78,8 @@ fn scene_snapshot_restores_the_selected_camera_and_its_other_components() {
         center: [1.0, 2.0, 3.0],
         radius: 1.0,
         albedo: [0.2; 3],
+        metallic: 0.6,
+        roughness: 0.2,
     };
     let bob = SineBob {
         rest_y: 2.0,
@@ -82,6 +95,8 @@ fn scene_snapshot_restores_the_selected_camera_and_its_other_components() {
         .query_one_mut::<(&Sphere, &SineBob)>(restored.active_camera)
         .unwrap();
     assert_eq!(restored_sphere.center, sphere.center);
+    assert_eq!(restored_sphere.metallic, sphere.metallic);
+    assert_eq!(restored_sphere.roughness, sphere.roughness);
     assert_eq!(restored_bob.amplitude, bob.amplitude);
 }
 

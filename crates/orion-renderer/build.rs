@@ -16,6 +16,7 @@ fn load_shader() -> String {
     for path in [
         "shaders/scene.wgsl",
         "shaders/mesh.wgsl",
+        "shaders/textures.wgsl",
         "shaders/wireframe.wgsl",
         "shaders/raymarch.wgsl",
     ] {

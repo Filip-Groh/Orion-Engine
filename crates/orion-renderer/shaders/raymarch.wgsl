@@ -2,7 +2,7 @@ fn trace_scene(origin: vec3<f32>, direction: vec3<f32>) -> RayHit {
     let closest = trace_meshes(origin, direction);
     let distance = march(origin, direction, closest.distance);
     if distance < closest.distance {
-        return RayHit(distance, NO_TRIANGLE);
+        return RayHit(distance, NO_TRIANGLE, vec2<f32>(0.0));
     }
     return closest;
 }
@@ -14,6 +14,45 @@ fn normal_at(p: vec3<f32>) -> vec3<f32> {
         sample_scene(p + e.yxy).distance - sample_scene(p - e.yxy).distance,
         sample_scene(p + e.yyx).distance - sample_scene(p - e.yyx).distance,
     ));
+}
+
+const PI: f32 = 3.141592653589793;
+// Scale irradiance so a Lambertian surface has the previous direct-light level.
+const LIGHT_IRRADIANCE: f32 = 0.76 * PI;
+
+fn surface_lighting(p: vec3<f32>, normal: vec3<f32>, view: vec3<f32>, material: Material) -> vec3<f32> {
+    let light = normalize(vec3<f32>(-0.6, 1.0, 0.45));
+    let n_dot_l = clamp(dot(normal, light), 0.0, 1.0);
+    let n_dot_v = clamp(dot(normal, view), 0.0, 1.0);
+    let diffuse_color = material.base_color * (1.0 - material.metallic);
+    let ambient = 0.24 * diffuse_color;
+    if n_dot_l <= 0.0 || n_dot_v <= 0.0 ||
+       trace_scene(p + normal * (4.0 * HIT_EPSILON), light).distance < FAR {
+        return ambient;
+    }
+
+    let halfway = normalize(view + light);
+    let n_dot_h = clamp(dot(normal, halfway), 0.0, 1.0);
+    let v_dot_h = clamp(dot(view, halfway), 0.0, 1.0);
+
+    // GGX normal distribution. Clamp perceptual roughness to keep the lobe finite.
+    let roughness = max(material.roughness, 0.045);
+    let alpha = roughness * roughness;
+    let alpha_squared = alpha * alpha;
+    let n_dot_h_squared = n_dot_h * n_dot_h;
+    let denominator = (1.0 - n_dot_h_squared) + n_dot_h_squared * alpha_squared;
+    let distribution = alpha_squared / (PI * denominator * denominator);
+
+    // Height-correlated Smith visibility and Schlick Fresnel.
+    let smith_view = n_dot_l * sqrt(alpha_squared + (1.0 - alpha_squared) * n_dot_v * n_dot_v);
+    let smith_light = n_dot_v * sqrt(alpha_squared + (1.0 - alpha_squared) * n_dot_l * n_dot_l);
+    let visibility = 0.5 / max(smith_view + smith_light, 1e-6);
+    let f0 = mix(vec3<f32>(0.04), material.base_color, material.metallic);
+    let fresnel = f0 + (1.0 - f0) * pow(1.0 - v_dot_h, 5.0);
+
+    let diffuse = diffuse_color * (1.0 - fresnel) / PI;
+    let specular = distribution * visibility * fresnel;
+    return ambient + (diffuse + specular) * (LIGHT_IRRADIANCE * n_dot_l);
 }
 
 fn shade(origin: vec3<f32>, direction: vec3<f32>, pixel_scale: f32) -> vec3<f32> {
@@ -32,10 +71,10 @@ fn shade(origin: vec3<f32>, direction: vec3<f32>, pixel_scale: f32) -> vec3<f32>
 
     let p = origin + distance * direction;
     var normal: vec3<f32>;
-    var albedo: vec3<f32>;
+    var material: Material;
     if hit.triangle_index == NO_TRIANGLE {
         normal = normal_at(p);
-        albedo = sample_scene(p).albedo;
+        material = sdf_material_at(p);
     } else {
         let triangle = triangle_at(hit.triangle_index);
         if (wireframes & MESH_WIREFRAME) != 0u &&
@@ -43,14 +82,10 @@ fn shade(origin: vec3<f32>, direction: vec3<f32>, pixel_scale: f32) -> vec3<f32>
             return vec3<f32>(0.04, 0.85, 1.0);
         }
         normal = normalize(cross(triangle.b - triangle.a, triangle.c - triangle.a));
-        albedo = triangle.albedo;
+        material = triangle_material(hit);
     }
-    let light = normalize(vec3<f32>(-0.6, 1.0, 0.45));
-    var diffuse = max(dot(normal, light), 0.0);
-    if diffuse > 0.0 && trace_scene(p + normal * (4.0 * HIT_EPSILON), light).distance < FAR {
-        diffuse = 0.0;
-    }
-    let color = albedo * (0.24 + 0.76 * diffuse);
+
+    let color = surface_lighting(p, normal, -direction, material);
     return mix(color, sky, 1.0 - exp(-0.0018 * distance * distance));
 }
 

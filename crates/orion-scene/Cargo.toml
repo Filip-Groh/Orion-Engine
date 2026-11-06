@@ -5,6 +5,9 @@ edition.workspace = true
 
 [dependencies]
 anyhow.workspace = true
-gltf = { version = "1.4", default-features = false, features = ["utils"] }
+base64 = "0.22"
+gltf = { version = "1.4", default-features = false, features = ["utils", "KHR_texture_transform"] }
 hecs.workspace = true
+image = { version = "0.25", default-features = false, features = ["jpeg", "png"] }
+percent-encoding = "2"
 serde.workspace = true

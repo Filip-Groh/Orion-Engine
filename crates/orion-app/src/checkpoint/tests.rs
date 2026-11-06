@@ -1,7 +1,7 @@
 use std::fs;
 
 use orion_renderer::TransformSnapshot;
-use orion_scene::{Camera, Scene};
+use orion_scene::{Camera, DEFAULT_ROUGHNESS, Mesh, Scene, Sphere};
 use winit::keyboard::KeyCode;
 
 use super::*;
@@ -69,7 +69,12 @@ const VERSION_ONE_CHECKPOINT: &str = r#"{
                 "eye": [0.0, 0.0, 0.0],
                 "target": [0.0, 0.0, -1.0],
                 "vertical_fov_degrees": 38.0
-            }
+            },
+            "sphere": {"center": [1, 1, 1], "radius": 1, "albedo": [0.25, 0.5, 1]},
+            "mesh": {"triangles": [{
+                "vertices": [[0, 0, 0], [1, 0, 0], [0, 1, 0]],
+                "albedo": [1, 0.5, 0.25]
+            }]}
         }]
     },
     "freecam": {"keys": [], "yaw": 0.0, "pitch": 0.0},
@@ -96,6 +101,28 @@ fn new_input_runs_after_saved_input_for_the_same_tick() -> Result<()> {
     assert!(eye[2] < 0.0);
     simulation.advance_to(12, &mut previous)?;
     assert_eq!(simulation.scene.camera()?.eye, eye);
+    Ok(())
+}
+
+#[test]
+fn checkpoints_with_only_albedo_get_default_material_factors() -> Result<()> {
+    let checkpoint: Checkpoint = serde_json::from_str(VERSION_ONE_CHECKPOINT)?;
+    let mut simulation = checkpoint.restore()?;
+    let (sphere, mesh) = simulation
+        .scene
+        .world
+        .query_one_mut::<(&Sphere, &Mesh)>(simulation.scene.active_camera)?;
+    assert_eq!(sphere.albedo, [0.25, 0.5, 1.0]);
+    assert_eq!(
+        (sphere.metallic, sphere.roughness),
+        (0.0, DEFAULT_ROUGHNESS)
+    );
+    let triangle = mesh.triangles[0];
+    assert_eq!(triangle.albedo, [1.0, 0.5, 0.25]);
+    assert_eq!(
+        (triangle.metallic, triangle.roughness),
+        (0.0, DEFAULT_ROUGHNESS)
+    );
     Ok(())
 }
 
