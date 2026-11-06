@@ -64,13 +64,13 @@ fn triangle_at(index: u32) -> Triangle {
                     scene.geometry[offset + 2u].xyz, scene.geometry[offset + 3u].xyz);
 }
 
-// Two-sided Möller–Trumbore intersection. FAR represents a miss.
+// Front-face Möller–Trumbore intersection. FAR represents a miss.
 fn triangle_distance(origin: vec3<f32>, direction: vec3<f32>, triangle: Triangle) -> f32 {
     let ab = triangle.b - triangle.a;
     let ac = triangle.c - triangle.a;
     let p = cross(direction, ac);
     let determinant = dot(ab, p);
-    if abs(determinant) <= 1e-6 * length(cross(ab, ac)) {
+    if determinant <= 1e-6 * length(cross(ab, ac)) {
         return FAR;
     }
 
@@ -129,8 +129,7 @@ fn shade(origin: vec3<f32>, direction: vec3<f32>) -> vec3<f32> {
         albedo = sample_scene(p).albedo;
     } else {
         let triangle = triangle_at(hit.triangle_index);
-        let face_normal = normalize(cross(triangle.b - triangle.a, triangle.c - triangle.a));
-        normal = select(face_normal, -face_normal, dot(face_normal, direction) > 0.0);
+        normal = normalize(cross(triangle.b - triangle.a, triangle.c - triangle.a));
         albedo = triangle.albedo;
     }
     let light = normalize(vec3<f32>(-0.6, 1.0, 0.45));

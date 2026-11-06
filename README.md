@@ -10,7 +10,13 @@ Use a recent stable Rust toolchain and a Vulkan 1.1 driver with graphics, comput
 cargo run
 ```
 
-The demo renders three spheres over a checkerboard plane, with a green triangle passing through the red sphere. The resizable window starts at a logical size of 960 × 540. The egui overlay in the top-left corner shows the frame rate, averaged over half-second intervals.
+The demo renders three spheres and the bundled Suzanne OBJ over a checkerboard plane, with a green triangle passing through the red sphere. Triangles are visible from the side where their vertices wind counterclockwise. The resizable window starts at a logical size of 960 × 540. The egui overlay in the top-left corner shows the frame rate, averaged over half-second intervals.
+
+Pass an OBJ file to add it to the demo scene in its original coordinates. Orion triangulates polygon faces and shades them with a uniform color and flat face normals. Prepare the mesh for a Y-up scene and place it in view of the demo camera.
+
+```sh
+cargo run -- path/to/mesh.obj
+```
 
 The demo prefers Vulkan's immediate present mode for uncapped FPS measurements. It uses mailbox mode when immediate mode is unavailable and falls back to refresh-synced FIFO when the surface offers neither mode.
 
@@ -20,6 +26,6 @@ Click inside the window to capture the mouse for freecam. Move the mouse to look
 
 | Crate | Responsibility |
 | --- | --- |
-| [`orion-scene`](crates/orion-scene) | Camera, sphere and triangle parameters, and the demo scene. |
+| [`orion-scene`](crates/orion-scene) | Camera, sphere and triangle parameters, OBJ import, and the demo scene. |
 | [`orion-renderer`](crates/orion-renderer) | Vulkan device, compute pipeline, scene upload, and swapchain presentation. The ray marcher and shading live in [`raymarch.wgsl`](crates/orion-renderer/shaders/raymarch.wgsl). |
 | [`orion-app`](crates/orion-app) | Default executable. It owns the winit event loop and drives the demo. |

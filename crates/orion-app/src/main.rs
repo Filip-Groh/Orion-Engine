@@ -1,7 +1,9 @@
 mod fps;
 mod freecam;
 
-use anyhow::{Context, Result};
+use std::env;
+
+use anyhow::{Context, Result, ensure};
 use fps::FpsCounter;
 use freecam::Freecam;
 use orion_renderer::Renderer;
@@ -142,7 +144,7 @@ impl ApplicationHandler for App {
                         renderer.window().request_redraw();
                     }
                     Err(error) => {
-                        self.error = Some(error.context("render the demo scene"));
+                        self.error = Some(error.context("render the scene"));
                         event_loop.exit();
                     }
                 }
@@ -161,8 +163,14 @@ impl ApplicationHandler for App {
 }
 
 fn main() -> Result<()> {
+    let mut args = env::args_os().skip(1);
+    let obj_path = args.next();
+    ensure!(args.next().is_none(), "usage: orion-app [OBJ path]");
+    let mut scene = Scene::demo();
+    if let Some(path) = obj_path {
+        scene.import_obj(path, [0.65, 0.65, 0.65])?;
+    }
     let event_loop = EventLoop::new().context("create the window event loop")?;
-    let scene = Scene::demo();
     let mut app = App {
         renderer: None,
         freecam: Freecam::new(&scene.camera),

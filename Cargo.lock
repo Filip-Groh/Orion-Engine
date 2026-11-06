@@ -1244,6 +1244,9 @@ dependencies = [
 [[package]]
 name = "orion-scene"
 version = "0.1.0"
+dependencies = [
+ "anyhow",
+]
 
 [[package]]
 name = "owned_ttf_parser"
