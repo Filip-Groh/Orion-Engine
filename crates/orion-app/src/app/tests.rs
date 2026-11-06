@@ -1,6 +1,6 @@
 use std::time::Duration;
 
-use orion_scene::Camera;
+use orion_scene::{Camera, Entity};
 use winit::keyboard::KeyCode;
 
 use super::*;
@@ -79,4 +79,76 @@ fn batched_and_individual_ticks_replay_to_identical_camera_state() {
         )
     };
     assert_eq!(run(&[17, 34, 50, 67, 84, 100]), run(&[100]));
+}
+
+#[test]
+fn only_the_marked_sphere_moves_and_its_sine_wave_repeats() {
+    let start = Instant::now();
+    let mut app = App::new(Scene::demo()).unwrap();
+    app.start_simulation(start);
+    let (animated, bob) = animated_sphere(&app.scene);
+    let static_centers: Vec<_> = app
+        .scene
+        .world
+        .query::<(Entity, &Sphere)>()
+        .iter()
+        .filter(|(entity, _)| *entity != animated)
+        .map(|(entity, sphere)| (entity, sphere.center))
+        .collect();
+    assert_eq!(static_centers.len(), 2);
+
+    for (ms, offset) in [(0, 0.0), (500, 1.0), (1000, 0.0), (1500, -1.0), (2000, 0.0)] {
+        app.advance_simulation(start + Duration::from_millis(ms))
+            .unwrap();
+        let y = sphere_center(&app.scene, animated)[1];
+        assert_eq!(y, bob.rest_y + offset * bob.amplitude);
+        for &(entity, center) in &static_centers {
+            assert_eq!(sphere_center(&app.scene, entity), center);
+        }
+    }
+}
+
+#[test]
+fn catch_up_keeps_the_penultimate_sphere_state_and_resume_preserves_phase() {
+    let start = Instant::now();
+    let at = |ms| start + Duration::from_millis(ms);
+    let mut batched = App::new(Scene::demo()).unwrap();
+    let mut split = App::new(Scene::demo()).unwrap();
+    batched.start_simulation(start);
+    split.start_simulation(start);
+    let (animated, _) = animated_sphere(&batched.scene);
+    let (split_sphere, _) = animated_sphere(&split.scene);
+    assert_eq!(batched.previous.sphere_center(animated), None);
+
+    split.advance_simulation(at(84)).unwrap();
+    let penultimate = sphere_center(&split.scene, split_sphere);
+    split.advance_simulation(at(100)).unwrap();
+    batched.advance_simulation(at(100)).unwrap();
+    assert_eq!(batched.previous.sphere_center(animated), Some(penultimate));
+    assert_eq!(
+        sphere_center(&batched.scene, animated),
+        sphere_center(&split.scene, split_sphere)
+    );
+
+    batched.drop_renderer();
+    batched.start_simulation(at(1000));
+    assert_eq!(batched.previous.sphere_center(animated), None);
+    batched.advance_simulation(at(1017)).unwrap();
+    split.advance_simulation(at(117)).unwrap();
+    assert_eq!(
+        sphere_center(&batched.scene, animated),
+        sphere_center(&split.scene, split_sphere)
+    );
+}
+
+fn animated_sphere(scene: &Scene) -> (Entity, SineBob) {
+    let mut query = scene.world.query::<(Entity, &SineBob)>();
+    let mut animated = query.iter();
+    let (entity, bob) = animated.next().unwrap();
+    assert!(animated.next().is_none());
+    (entity, *bob)
+}
+
+fn sphere_center(scene: &Scene, entity: Entity) -> [f32; 3] {
+    scene.world.get::<&Sphere>(entity).unwrap().center
 }

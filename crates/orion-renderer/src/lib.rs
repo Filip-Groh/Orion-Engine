@@ -8,6 +8,7 @@ mod overlay;
 mod overlay_target;
 mod pipeline;
 mod scene_buffer;
+mod scene_frame;
 mod storage_buffer;
 mod surface;
 mod swapchain;
@@ -21,6 +22,7 @@ use dispatch::Dispatch;
 use frame::FrameOutcome;
 use overlay::Overlay;
 use pipeline::Pipeline;
+pub use scene_frame::{SceneFrame, TransformSnapshot};
 use swapchain::Swapchain;
 
 pub struct Renderer<W> {
@@ -73,7 +75,7 @@ impl<W: HasDisplayHandle + HasWindowHandle> Renderer<W> {
         before_present: impl FnOnce(&W),
     ) -> Result<bool> {
         let result = self.render_frame(
-            scene,
+            SceneFrame::new(scene),
             size,
             None::<(f32, fn(&mut egui::Ui))>,
             before_present,
@@ -90,6 +92,18 @@ impl<W: HasDisplayHandle + HasWindowHandle> Renderer<W> {
         draw_ui: impl FnMut(&mut egui::Ui),
         before_present: impl FnOnce(&W),
     ) -> Result<bool> {
+        self.render_frame_with_overlay(SceneFrame::new(scene), size, scale, draw_ui, before_present)
+    }
+
+    /// Renders a sampled scene with a passive overlay and reports whether it was presented.
+    pub fn render_frame_with_overlay(
+        &mut self,
+        frame: SceneFrame<'_>,
+        size: [u32; 2],
+        scale: f32,
+        draw_ui: impl FnMut(&mut egui::Ui),
+        before_present: impl FnOnce(&W),
+    ) -> Result<bool> {
         ensure!(
             self.overlay_enabled,
             "create the renderer with egui overlay support first"
@@ -98,7 +112,7 @@ impl<W: HasDisplayHandle + HasWindowHandle> Renderer<W> {
             scale.is_finite() && scale > 0.0,
             "egui requires a positive finite scale factor"
         );
-        let result = self.render_frame(scene, size, Some((scale, draw_ui)), before_present)?;
+        let result = self.render_frame(frame, size, Some((scale, draw_ui)), before_present)?;
         Ok(matches!(result, FrameOutcome::Presented))
     }
 }

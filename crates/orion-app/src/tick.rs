@@ -3,7 +3,7 @@ use std::{
     time::{Duration, Instant},
 };
 
-const TICKS_PER_SECOND: u64 = 60;
+pub(crate) const TICKS_PER_SECOND: u64 = 60;
 const NANOS_PER_SECOND: u128 = 1_000_000_000;
 pub(crate) const TICK_SECONDS: f32 = 1.0 / TICKS_PER_SECOND as f32;
 
@@ -37,10 +37,20 @@ impl TickClock {
     }
 
     pub fn next_deadline(&self) -> Instant {
+        self.deadline(self.completed + 1)
+    }
+
+    pub fn interpolation_fraction(&self, now: Instant) -> f32 {
+        let last = self.deadline(self.completed);
+        let interval = self.next_deadline() - last;
+        let elapsed = now.saturating_duration_since(last).min(interval);
+        (elapsed.as_secs_f64() / interval.as_secs_f64()) as f32
+    }
+
+    fn deadline(&self, tick: u64) -> Instant {
         // Round each boundary from the epoch so nanosecond rounding cannot accumulate.
-        let next = self.completed + 1;
-        let seconds = next / TICKS_PER_SECOND;
-        let fraction = u128::from(next % TICKS_PER_SECOND) * NANOS_PER_SECOND;
+        let seconds = tick / TICKS_PER_SECOND;
+        let fraction = u128::from(tick % TICKS_PER_SECOND) * NANOS_PER_SECOND;
         let nanos = fraction.div_ceil(u128::from(TICKS_PER_SECOND)) as u32;
         self.start + Duration::new(seconds, nanos)
     }
@@ -64,5 +74,24 @@ mod tests {
         assert_eq!(clock.take_due_ticks(first), 1..2);
         assert_eq!(clock.take_due_ticks(start + Duration::from_secs(1)), 2..61);
         assert_eq!(clock.next_deadline(), first + Duration::from_secs(1));
+    }
+
+    #[test]
+    fn interpolation_fraction_stays_between_the_last_two_states() {
+        let start = Instant::now();
+        let mut clock = TickClock::new(start);
+        let first = clock.next_deadline();
+        clock.take_due_ticks(first);
+        let next = clock.next_deadline();
+        assert_eq!(clock.interpolation_fraction(start), 0.0);
+        assert_eq!(clock.interpolation_fraction(first), 0.0);
+        assert!((clock.interpolation_fraction(first + (next - first) / 2) - 0.5).abs() < 1e-6);
+        assert_eq!(clock.interpolation_fraction(next), 1.0);
+        assert_eq!(
+            clock.interpolation_fraction(next + Duration::from_secs(1)),
+            1.0
+        );
+        clock.take_due_ticks(next);
+        assert_eq!(clock.interpolation_fraction(next), 0.0);
     }
 }

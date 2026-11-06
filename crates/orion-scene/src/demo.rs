@@ -1,4 +1,4 @@
-use crate::{Camera, Mesh, Scene, Sphere, Triangle, obj};
+use crate::{Camera, Mesh, Scene, SineBob, Sphere, Triangle, obj};
 
 impl Scene {
     pub fn demo() -> Self {
@@ -18,12 +18,19 @@ impl Scene {
                 radius: 0.72,
                 albedo: [0.05, 0.42, 0.82],
             },),
-            (Sphere {
-                center: [0.48, 0.34, 1.05],
+        ]);
+        let bob = SineBob {
+            rest_y: 0.84,
+            amplitude: 0.50,
+        };
+        scene.world.spawn((
+            Sphere {
+                center: [0.48, bob.rest_y, 1.05],
                 radius: 0.34,
                 albedo: [0.94, 0.67, 0.12],
-            },),
-        ]);
+            },
+            bob,
+        ));
         scene.world.spawn_batch([
             (Mesh {
                 triangles: vec![Triangle {

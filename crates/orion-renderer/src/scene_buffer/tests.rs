@@ -1,6 +1,8 @@
 use bytemuck::pod_read_unaligned;
+use orion_scene::Scene;
 
 use super::*;
+use crate::TransformSnapshot;
 
 const EXTENT: vk::Extent2D = vk::Extent2D {
     width: 960,
@@ -34,14 +36,14 @@ fn packs_the_active_camera_and_current_world_geometry() {
     scene.world.spawn((Mesh { triangles: vec![] },));
 
     let header_size = size_of::<SceneHeader>();
-    let bytes = pack_scene(&scene, EXTENT, false, 1024).unwrap();
+    let bytes = pack_scene(SceneFrame::new(&scene), EXTENT, false, 1024).unwrap();
     let header: SceneHeader = pod_read_unaligned(&bytes[..header_size]);
     assert_eq!(header.eye_and_fov_scale[..3], [1.0, 2.0, 3.0]);
     assert_eq!(header.geometry_counts, [1, 1, 1, 0]);
 
     scene.world.despawn(sphere).unwrap();
     scene.world.remove_one::<Mesh>(mesh).unwrap();
-    let bytes = pack_scene(&scene, EXTENT, false, 1024).unwrap();
+    let bytes = pack_scene(SceneFrame::new(&scene), EXTENT, false, 1024).unwrap();
     let header: SceneHeader = pod_read_unaligned(&bytes[..header_size]);
     assert_eq!(header.geometry_counts, [0; 4]);
     assert_eq!(bytes.len(), header_size + size_of::<[f32; 4]>());
@@ -62,7 +64,7 @@ fn packs_geometry_in_shader_order_and_respects_the_exact_buffer_limit() {
         }],
     },));
 
-    let bytes = pack_scene(&scene, EXTENT, true, 192).unwrap();
+    let bytes = pack_scene(SceneFrame::new(&scene), EXTENT, true, 192).unwrap();
     assert_eq!(bytes.len(), 192);
     let header: SceneHeader = pod_read_unaligned(&bytes[..64]);
     assert_eq!(header.extent_format, [960, 540, 1, 0]);
@@ -93,7 +95,7 @@ fn packs_geometry_in_shader_order_and_respects_the_exact_buffer_limit() {
             1,
         ]
     );
-    let error = pack_scene(&scene, EXTENT, true, 191).unwrap_err();
+    let error = pack_scene(SceneFrame::new(&scene), EXTENT, true, 191).unwrap_err();
     assert_eq!(
         error.to_string(),
         "scene exceeds the device's storage buffer limit"
@@ -104,7 +106,7 @@ fn packs_geometry_in_shader_order_and_respects_the_exact_buffer_limit() {
 fn rejects_a_vertical_camera_and_non_finite_triangle_vertices() {
     let mut scene = empty_scene();
     scene.camera_mut().unwrap().target = [0.0, 0.0, 2.0];
-    let error = pack_scene(&scene, EXTENT, false, 1024).unwrap_err();
+    let error = pack_scene(SceneFrame::new(&scene), EXTENT, false, 1024).unwrap_err();
     assert!(
         error
             .to_string()
@@ -118,10 +120,104 @@ fn rejects_a_vertical_camera_and_non_finite_triangle_vertices() {
             albedo: [1.0; 3],
         }],
     },));
-    let error = pack_scene(&scene, EXTENT, false, 1024).unwrap_err();
+    let error = pack_scene(SceneFrame::new(&scene), EXTENT, false, 1024).unwrap_err();
     assert!(
         error
             .to_string()
             .starts_with("triangles require finite vertices")
     );
+}
+
+#[test]
+fn interpolated_sphere_upload_blends_positions_without_mutating_the_scene() {
+    let mut scene = empty_scene();
+    let sphere = scene.world.spawn((Sphere {
+        center: [1.0, 2.0, 3.0],
+        radius: 1.0,
+        albedo: [1.0; 3],
+    },));
+    let mut snapshot = TransformSnapshot::default();
+    snapshot.capture(&scene).unwrap();
+    scene.world.get::<&mut Sphere>(sphere).unwrap().center[1] = 6.0;
+
+    for (fraction, expected_y) in [(-1.0, 2.0), (0.0, 2.0), (0.25, 3.0), (1.0, 6.0), (2.0, 6.0)] {
+        let frame = SceneFrame::interpolated(&scene, &snapshot, fraction);
+        let bytes = pack_scene(frame, EXTENT, false, 1024).unwrap();
+        let packed: GpuSphere = pod_read_unaligned(&bytes[size_of::<SceneHeader>()..]);
+        assert_eq!(packed.center_radius, [1.0, expected_y, 3.0, 1.0]);
+    }
+    assert_eq!(
+        scene.world.get::<&Sphere>(sphere).unwrap().center,
+        [1.0, 6.0, 3.0]
+    );
+}
+
+#[test]
+fn new_entities_and_camera_switches_use_current_transforms() {
+    let mut scene = empty_scene();
+    let old = scene.world.spawn((Sphere {
+        center: [1.0; 3],
+        radius: 1.0,
+        albedo: [1.0; 3],
+    },));
+    let mut snapshot = TransformSnapshot::default();
+    snapshot.capture(&scene).unwrap();
+    scene.world.despawn(old).unwrap();
+    scene.world.spawn((Sphere {
+        center: [3.0; 3],
+        radius: 1.0,
+        albedo: [1.0; 3],
+    },));
+    scene.active_camera = scene.world.spawn((Camera {
+        eye: [1.0, 2.0, 3.0],
+        ..scene.camera().unwrap()
+    },));
+    let frame = SceneFrame::interpolated(&scene, &snapshot, 0.0);
+    let bytes = pack_scene(frame, EXTENT, false, 1024).unwrap();
+    let baseline = pack_scene(SceneFrame::new(&scene), EXTENT, false, 1024).unwrap();
+    assert_eq!(bytes, baseline);
+
+    let empty = TransformSnapshot::default();
+    let frame = SceneFrame::interpolated(&scene, &empty, 0.0);
+    assert_eq!(pack_scene(frame, EXTENT, false, 1024).unwrap(), baseline);
+}
+
+#[test]
+fn interpolating_opposite_camera_headings_keeps_the_camera_valid() {
+    let mut scene = Scene::new(Camera {
+        eye: [0.0; 3],
+        target: [-1.0, 0.0, 0.0],
+        vertical_fov_degrees: 38.0,
+    });
+    let mut snapshot = TransformSnapshot::default();
+    snapshot.capture(&scene).unwrap();
+    let camera = scene.camera_mut().unwrap();
+    camera.eye = [2.0, 0.0, 0.0];
+    camera.target = [3.0, 0.0, 0.0];
+
+    let frame = SceneFrame::interpolated(&scene, &snapshot, 0.5);
+    let bytes = pack_scene(frame, EXTENT, false, 1024).unwrap();
+    let header: SceneHeader = pod_read_unaligned(&bytes[..size_of::<SceneHeader>()]);
+    assert_eq!(header.eye_and_fov_scale[..3], [1.0, 0.0, 0.0]);
+    assert!((header.look_at[0] - 1.0).abs() < 1e-6);
+    assert!((header.look_at[2].abs() - 1.0).abs() < 1e-6);
+}
+
+#[test]
+fn interpolation_falls_back_when_a_camera_target_rounds_onto_its_eye() {
+    let mut scene = Scene::new(Camera {
+        eye: [1e20, 0.0, 0.0],
+        target: [1e20, 0.0, 1.0],
+        vertical_fov_degrees: 38.0,
+    });
+    let mut snapshot = TransformSnapshot::default();
+    snapshot.capture(&scene).unwrap();
+    let camera = scene.camera_mut().unwrap();
+    camera.eye = [0.0, 0.0, 1e20];
+    camera.target = [1.0, 0.0, 1e20];
+
+    let frame = SceneFrame::interpolated(&scene, &snapshot, 0.5);
+    let bytes = pack_scene(frame, EXTENT, false, 1024).unwrap();
+    let current = pack_scene(SceneFrame::new(&scene), EXTENT, false, 1024).unwrap();
+    assert_eq!(bytes, current);
 }

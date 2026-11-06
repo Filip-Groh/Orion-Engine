@@ -22,7 +22,7 @@ The demo prefers Vulkan's immediate present mode for uncapped FPS measurements. 
 
 Click inside the window to capture the mouse for freecam. Move the mouse to look around, use **W/A/S/D** to fly, and use **Space/Ctrl** to rise or descend. Hold **Shift** to move faster. Press **Esc** to release the cursor.
 
-The simulation advances at a fixed 60 TPS. Freecam key changes and mouse deltas are queued for the next tick when the event loop receives them. Given the same starting camera and ordered inputs per tick, the simulation produces the same camera state regardless of redraw timing.
+The simulation advances at a fixed 60 TPS. Freecam key changes and mouse deltas are queued for the next tick when the event loop receives them. The gold sphere bobs vertically on a two-second sine wave driven by simulation ticks. Rendering blends the camera and sphere positions between the two latest completed states, one tick behind real time. Given the same starting state and ordered inputs per tick, the simulation produces the same state regardless of redraw timing.
 
 ## Workspace
 

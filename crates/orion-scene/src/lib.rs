@@ -24,6 +24,13 @@ pub struct Sphere {
     pub albedo: [f32; 3],
 }
 
+/// The rest height and vertical amplitude of a sine-wave animation.
+#[derive(Clone, Copy, Debug)]
+pub struct SineBob {
+    pub rest_y: f32,
+    pub amplitude: f32,
+}
+
 #[derive(Clone, Copy, Debug)]
 pub struct Triangle {
     /// World-space vertices in counterclockwise order as seen from the front.

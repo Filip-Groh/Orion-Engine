@@ -1,10 +1,10 @@
 mod commands;
 
+use crate::{
+    Renderer, SceneFrame, overlay::Overlay, scene_buffer::pack_scene, swapchain::Swapchain,
+};
 use anyhow::{Context, Result, ensure};
 use ash::vk;
-use orion_scene::Scene;
-
-use crate::{Renderer, overlay::Overlay, scene_buffer::pack_scene, swapchain::Swapchain};
 
 // Matches @workgroup_size in raymarch.wgsl.
 const WORKGROUP_SIZE: u32 = 8;
@@ -18,7 +18,7 @@ pub(super) enum FrameOutcome {
 impl<W> Renderer<W> {
     pub(super) fn render_frame(
         &mut self,
-        scene: &Scene,
+        frame: SceneFrame<'_>,
         [width, height]: [u32; 2],
         overlay: Option<(f32, impl FnMut(&mut egui::Ui))>,
         before_present: impl FnOnce(&W),
@@ -35,7 +35,7 @@ impl<W> Renderer<W> {
         let extent = swapchain.extent;
         let groups = dispatch_groups(extent, limits.max_compute_work_group_count)?;
         let max_bytes = (limits.max_storage_buffer_range as usize).min(isize::MAX as usize);
-        let scene_bytes = pack_scene(scene, extent, swapchain.bgra, max_bytes)?;
+        let scene_bytes = pack_scene(frame, extent, swapchain.bgra, max_bytes)?;
         self.dispatch
             .bind_buffers(&self.device, &scene_bytes, &swapchain.pixels)?;
 

@@ -1,9 +1,12 @@
 use anyhow::{Result, ensure};
 use ash::vk;
 use bytemuck::{Pod, Zeroable, bytes_of, cast_slice};
-use orion_scene::{Camera, Mesh, Scene, Sphere, Triangle};
+use orion_scene::{Camera, Entity, Mesh, Sphere, Triangle};
 
-use crate::bvh::{self, BvhNode};
+use crate::{
+    SceneFrame,
+    bvh::{self, BvhNode},
+};
 
 // The WGSL geometry array follows the header in sphere, triangle, BVH node order.
 #[repr(C)]
@@ -30,14 +33,17 @@ struct GpuTriangle {
 }
 
 pub(super) fn pack_scene(
-    scene: &Scene,
+    frame: SceneFrame<'_>,
     extent: vk::Extent2D,
     bgra: bool,
     max_bytes: usize,
 ) -> Result<Vec<u8>> {
-    let mut header = SceneHeader::new(scene.camera()?, extent, bgra)?;
-    let mut spheres = scene.world.query::<&Sphere>();
-    let mut meshes = scene.world.query::<&Mesh>();
+    let mut header = SceneHeader::new(frame.camera()?, extent, bgra).or_else(|_| {
+        // At large coordinates, rounding an interpolated target can collapse it onto the eye.
+        SceneHeader::new(frame.scene.camera()?, extent, bgra)
+    })?;
+    let mut spheres = frame.scene.world.query::<(Entity, &Sphere)>();
+    let mut meshes = frame.scene.world.query::<&Mesh>();
     let sphere_count = spheres.iter().len();
     let (mesh_count, triangle_count) = meshes
         .iter()
@@ -57,8 +63,12 @@ pub(super) fn pack_scene(
 
     let mut bytes = Vec::with_capacity(size);
     bytes.extend_from_slice(bytes_of(&header));
-    for sphere in spheres.iter() {
-        bytes.extend_from_slice(bytes_of(&GpuSphere::try_from(sphere)?));
+    for (entity, sphere) in spheres.iter() {
+        let sphere = Sphere {
+            center: frame.sphere_center(entity, sphere.center),
+            ..*sphere
+        };
+        bytes.extend_from_slice(bytes_of(&GpuSphere::try_from(&sphere)?));
     }
     let mut leaves = Vec::with_capacity(mesh_count);
     let mut first_triangle = 0;
