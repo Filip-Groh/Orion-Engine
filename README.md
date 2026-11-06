@@ -12,6 +12,8 @@ cargo run
 
 The demo renders three spheres over a checkerboard plane in a resizable window. Its initial logical size is 960 × 540.
 
+Click inside the window to capture the mouse for freecam. Move the mouse to look around, use **W/A/S/D** to fly, and use **Space/Ctrl** to rise or descend. Hold **Shift** to move faster. Press **Esc** to release the cursor.
+
 ## Workspace
 
 | Crate | Responsibility |

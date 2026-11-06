@@ -1,18 +1,31 @@
+mod freecam;
+
 use anyhow::{Context, Result};
+use freecam::Freecam;
 use orion_renderer::Renderer;
 use orion_scene::Scene;
 use winit::{
     application::ApplicationHandler,
     dpi::LogicalSize,
-    event::WindowEvent,
+    event::{DeviceEvent, DeviceId, ElementState, MouseButton, WindowEvent},
     event_loop::{ActiveEventLoop, EventLoop},
+    keyboard::{KeyCode, PhysicalKey},
     window::{Window, WindowId},
 };
 
 struct App {
     renderer: Option<Renderer<Window>>,
     scene: Scene,
+    freecam: Freecam,
     error: Option<anyhow::Error>,
+}
+
+impl App {
+    fn drop_renderer(&mut self) {
+        if let Some(renderer) = self.renderer.take() {
+            self.freecam.release(renderer.window());
+        }
+    }
 }
 
 impl ApplicationHandler for App {
@@ -40,6 +53,14 @@ impl ApplicationHandler for App {
         }
     }
 
+    fn device_event(&mut self, _: &ActiveEventLoop, _: DeviceId, event: DeviceEvent) {
+        if let (Some(renderer), DeviceEvent::MouseMotion { delta }) = (&self.renderer, event)
+            && self.freecam.look(&mut self.scene.camera, delta)
+        {
+            renderer.window().request_redraw();
+        }
+    }
+
     fn window_event(&mut self, event_loop: &ActiveEventLoop, id: WindowId, event: WindowEvent) {
         let Some(renderer) = self
             .renderer
@@ -50,23 +71,52 @@ impl ApplicationHandler for App {
         };
         match event {
             WindowEvent::CloseRequested | WindowEvent::Destroyed => event_loop.exit(),
+            WindowEvent::MouseInput {
+                state: ElementState::Pressed,
+                button: MouseButton::Left,
+                ..
+            } => {
+                self.freecam.capture(renderer.window());
+            }
+            WindowEvent::Focused(false) | WindowEvent::Occluded(true) => {
+                self.freecam.release(renderer.window());
+            }
+            WindowEvent::KeyboardInput {
+                event,
+                is_synthetic: false,
+                ..
+            } if !event.repeat => {
+                if let PhysicalKey::Code(key) = event.physical_key {
+                    let pressed = event.state.is_pressed();
+                    if key == KeyCode::Escape && pressed {
+                        self.freecam.release(renderer.window());
+                    } else if self.freecam.set_key(&mut self.scene.camera, key, pressed) {
+                        renderer.window().request_redraw();
+                    }
+                }
+            }
             WindowEvent::Resized(_)
             | WindowEvent::ScaleFactorChanged { .. }
             | WindowEvent::Occluded(false) => {
                 renderer.window().request_redraw();
             }
             WindowEvent::RedrawRequested => {
-                if renderer.window().is_minimized() == Some(true) {
+                let size = renderer.window().inner_size();
+                if size.width == 0
+                    || size.height == 0
+                    || renderer.window().is_minimized() == Some(true)
+                {
+                    self.freecam.release(renderer.window());
                     return;
                 }
-                let size = renderer.window().inner_size();
+                let moving = self.freecam.step(&mut self.scene.camera);
                 match renderer.render(
                     &self.scene,
                     [size.width, size.height],
                     Window::pre_present_notify,
                 ) {
-                    Ok(true) => renderer.window().request_redraw(),
-                    Ok(false) => {}
+                    Ok(retry) if retry || moving => renderer.window().request_redraw(),
+                    Ok(_) => {}
                     Err(error) => {
                         self.error = Some(error.context("render the demo scene"));
                         event_loop.exit();
@@ -78,19 +128,21 @@ impl ApplicationHandler for App {
     }
 
     fn suspended(&mut self, _event_loop: &ActiveEventLoop) {
-        self.renderer = None;
+        self.drop_renderer();
     }
 
     fn exiting(&mut self, _event_loop: &ActiveEventLoop) {
-        self.renderer = None;
+        self.drop_renderer();
     }
 }
 
 fn main() -> Result<()> {
     let event_loop = EventLoop::new().context("create the window event loop")?;
+    let scene = Scene::demo();
     let mut app = App {
         renderer: None,
-        scene: Scene::demo(),
+        freecam: Freecam::new(&scene.camera),
+        scene,
         error: None,
     };
     event_loop
