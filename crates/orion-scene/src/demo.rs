@@ -1,4 +1,4 @@
-use crate::{Camera, Mesh, Scene, SineBob, Sphere, Triangle, obj};
+use crate::{Camera, Mesh, Scene, SineBob, Sphere, Triangle, glb, obj};
 
 impl Scene {
     pub fn demo() -> Self {
@@ -41,6 +41,21 @@ impl Scene {
             },),
             (suzanne(),),
         ]);
+        let mut lamp = glb::parse(include_bytes!("../assets/lamp.glb"), [0.65; 3])
+            .expect("bundled lamp.glb is valid");
+        for triangle in &mut lamp {
+            triangle.vertices = triangle
+                .vertices
+                .map(|[x, y, z]| [2.2 * x - 1.0, 2.2 * y + 2.01, 2.2 * z + 1.85]);
+        }
+        // Each mesh is a BVH leaf. Bound the triangle work per leaf for the chess set.
+        scene
+            .world
+            .spawn_batch(lamp.chunks(256).map(|triangles| {
+                (Mesh {
+                    triangles: triangles.to_vec(),
+                },)
+            }));
         scene
     }
 }

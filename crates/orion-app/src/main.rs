@@ -22,10 +22,10 @@ use crate::{simulation::Simulation, video::VideoOptions};
     args_conflicts_with_subcommands = true
 )]
 struct Cli {
-    /// Add an OBJ mesh to the interactive demo.
-    obj: Option<PathBuf>,
+    /// Add an OBJ or GLB mesh to the interactive demo.
+    mesh: Option<PathBuf>,
     /// Resume a checkpoint in the interactive demo.
-    #[arg(long, conflicts_with = "obj")]
+    #[arg(long, conflicts_with = "mesh")]
     load: Option<PathBuf>,
     #[command(subcommand)]
     command: Option<Action>,
@@ -38,8 +38,9 @@ enum Action {
         output: PathBuf,
         #[arg(long)]
         tick: u64,
-        #[arg(long)]
-        obj: Option<PathBuf>,
+        /// Add an OBJ or GLB mesh to the checkpoint.
+        #[arg(long, visible_alias = "obj")]
+        mesh: Option<PathBuf>,
     },
     /// Render ticks from a checkpoint to an H.264 MP4 using FFmpeg.
     Render {
@@ -53,8 +54,8 @@ enum Action {
 fn main() -> Result<()> {
     let cli = Cli::parse();
     match cli.command {
-        Some(Action::Snapshot { output, tick, obj }) => {
-            let mut simulation = demo(obj.as_deref())?;
+        Some(Action::Snapshot { output, tick, mesh }) => {
+            let mut simulation = demo(mesh.as_deref())?;
             simulation.advance_to(tick, &mut TransformSnapshot::default())?;
             checkpoint::save(&simulation, &output)?;
             println!("Saved tick {tick} to {}", output.display());
@@ -68,17 +69,25 @@ fn main() -> Result<()> {
         None => {
             let simulation = match cli.load {
                 Some(path) => checkpoint::load(&path)?,
-                None => demo(cli.obj.as_deref())?,
+                None => demo(cli.mesh.as_deref())?,
             };
             app::App::new(simulation).run()
         }
     }
 }
 
-fn demo(obj: Option<&Path>) -> Result<Simulation> {
+fn demo(mesh: Option<&Path>) -> Result<Simulation> {
     let mut scene = Scene::demo();
-    if let Some(path) = obj {
-        scene.import_obj(path, [0.65, 0.65, 0.65])?;
+    if let Some(path) = mesh {
+        let albedo = [0.65; 3];
+        if path
+            .extension()
+            .is_some_and(|ext| ext.eq_ignore_ascii_case("glb"))
+        {
+            scene.import_glb(path, albedo)?;
+        } else {
+            scene.import_obj(path, albedo)?;
+        }
     }
     Simulation::new(scene)
 }

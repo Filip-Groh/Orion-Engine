@@ -1,6 +1,7 @@
 //! ECS scene data for the SDF and triangle renderer.
 
 mod demo;
+mod glb;
 mod obj;
 mod snapshot;
 
@@ -85,6 +86,16 @@ impl Scene {
             fs::read_to_string(path).with_context(|| format!("read {}", path.display()))?;
         let triangles =
             obj::parse(&source, albedo).with_context(|| format!("import {}", path.display()))?;
+        Ok(self.world.spawn((Mesh { triangles },)))
+    }
+
+    /// Spawns the static triangle geometry of a binary glTF asset as one mesh entity.
+    /// Node transforms are baked into world-space positions and faces use the supplied albedo.
+    pub fn import_glb(&mut self, path: impl AsRef<Path>, albedo: [f32; 3]) -> Result<Entity> {
+        let path = path.as_ref();
+        let source = fs::read(path).with_context(|| format!("read {}", path.display()))?;
+        let triangles =
+            glb::parse(&source, albedo).with_context(|| format!("import {}", path.display()))?;
         Ok(self.world.spawn((Mesh { triangles },)))
     }
 }

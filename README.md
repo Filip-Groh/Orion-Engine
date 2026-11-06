@@ -10,12 +10,13 @@ Use a recent stable Rust toolchain and a Vulkan 1.1 driver with graphics, comput
 cargo run
 ```
 
-The demo renders three spheres and the bundled Suzanne OBJ over a checkerboard plane, with a green triangle passing through the red sphere. Triangles are visible from the side where their vertices wind counterclockwise. The resizable window starts at a logical size of 960 × 540. The egui overlay in the top-left corner shows presented frames per second (FPS) and completed simulation ticks per second (TPS), sampled over roughly half-second intervals.
+The demo renders three spheres, the bundled Suzanne OBJ, and the chess set from `scene.glb` over a checkerboard plane, with a green triangle passing through the red sphere. Triangles are visible from the side where their vertices wind counterclockwise. The resizable window starts at a logical size of 960 × 540. The egui overlay in the top-left corner shows presented frames per second (FPS) and completed simulation ticks per second (TPS), sampled over roughly half-second intervals.
 
-Pass an OBJ file to add it to the demo scene in its original coordinates. Orion triangulates polygon faces and shades them with a uniform color and flat face normals. Prepare the mesh for a Y-up scene and place it in view of the demo camera.
+Pass an OBJ or GLB file to add its geometry to the demo scene. Orion triangulates OBJ polygon faces and uses the embedded geometry from a GLB's default scene, falling back to the first scene or to untransformed meshes if the asset has no scenes. GLB node transforms are baked into the imported triangles. Both formats use a uniform color and flat face normals. Prepare the mesh for a Y-up scene and place it in view of the demo camera.
 
 ```sh
 cargo run -- path/to/mesh.obj
+cargo run -- path/to/mesh.glb
 ```
 
 The demo prefers Vulkan's immediate present mode for uncapped FPS measurements. It uses mailbox mode when immediate mode is unavailable and falls back to refresh-synced FIFO when the surface offers neither mode.
@@ -32,7 +33,7 @@ Press **F5** to save the latest completed tick to `orion-quicksave.json` in the 
 cargo run -- --load orion-quicksave.json
 ```
 
-Checkpoints include the active camera, scene geometry, animation state, held controls, and queued input. Meshes are embedded in the file. Press **Esc** after loading if you want to release saved movement controls. The `snapshot` command runs the demo without input to an exact tick and saves it without opening a window. Add `--obj path/to/mesh.obj` to include a custom mesh.
+Checkpoints include the active camera, scene geometry, animation state, held controls, and queued input. Meshes are embedded in the file. Press **Esc** after loading if you want to release saved movement controls. The `snapshot` command runs the demo without input to an exact tick and saves it without opening a window. Add `--mesh path/to/mesh.glb` or `--mesh path/to/mesh.obj` to include a custom mesh. The existing `--obj` flag is an alias for `--mesh`.
 
 ```sh
 cargo run -- snapshot tick-1000.json --tick 1000
@@ -52,10 +53,10 @@ This produces 300 frames over five seconds. The first frame shows tick 1000, and
 
 | Crate | Responsibility |
 | --- | --- |
-| [`orion-scene`](crates/orion-scene) | [hecs](https://github.com/Ralith/hecs) world, scene components, OBJ import, and demo setup. |
+| [`orion-scene`](crates/orion-scene) | [hecs](https://github.com/Ralith/hecs) world, scene components, OBJ and GLB import, and demo setup. |
 | [`orion-renderer`](crates/orion-renderer) | Vulkan device, compute pipeline, scene upload, swapchain presentation, and offscreen rendering. The compute shader is assembled from the files in [`shaders`](crates/orion-renderer/shaders). |
 | [`orion-app`](crates/orion-app) | Default executable. It drives the demo, checkpoints, and video export. |
 
-`Scene::world` stores cameras, spheres, and meshes as components. Set `Scene::active_camera` to select the camera entity. The renderer queries the world each frame, so spawning or despawning a sphere or mesh affects the next frame. `Scene::import_obj` returns the entity for the imported mesh.
+`Scene::world` stores cameras, spheres, and meshes as components. Set `Scene::active_camera` to select the camera entity. The renderer queries the world each frame, so spawning or despawning a sphere or mesh affects the next frame. `Scene::import_obj` and `Scene::import_glb` return the entity for the imported mesh.
 
 Run the workspace tests with `cargo test --workspace`. They run without a Vulkan device or a window.

@@ -42,7 +42,7 @@ fn obj_import_spawns_one_mesh_with_the_requested_albedo() {
 }
 
 #[test]
-fn demo_keeps_the_triangle_and_suzanne_in_separate_meshes() {
+fn demo_includes_the_triangle_suzanne_and_bundled_glb() {
     let scene = Scene::demo();
     let mut triangle_counts: Vec<_> = scene
         .world
@@ -51,7 +51,9 @@ fn demo_keeps_the_triangle_and_suzanne_in_separate_meshes() {
         .map(|mesh| mesh.triangles.len())
         .collect();
     triangle_counts.sort_unstable();
-    assert_eq!(triangle_counts, [1, 968]);
+    assert_eq!(triangle_counts.first(), Some(&1));
+    assert_eq!(triangle_counts.last(), Some(&968));
+    assert_eq!(triangle_counts.iter().sum::<usize>(), 1_499_072 + 968 + 1);
 }
 
 #[test]
