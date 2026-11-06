@@ -1,4 +1,4 @@
-//! Renderer-independent inputs for an SDF scene.
+//! Renderer-independent inputs for scenes with SDFs and triangles.
 
 /// A perspective camera with +Y as world up.
 #[derive(Clone, Copy, Debug)]
@@ -16,10 +16,19 @@ pub struct Sphere {
     pub albedo: [f32; 3],
 }
 
+#[derive(Clone, Copy, Debug)]
+pub struct Triangle {
+    /// World-space vertices of a two-sided triangle.
+    pub vertices: [[f32; 3]; 3],
+    /// Linear RGB reflectance, with each component in `0.0..=1.0`.
+    pub albedo: [f32; 3],
+}
+
 #[derive(Clone, Debug)]
 pub struct Scene {
     pub camera: Camera,
     pub spheres: Vec<Sphere>,
+    pub triangles: Vec<Triangle>,
 }
 
 impl Scene {
@@ -47,6 +56,11 @@ impl Scene {
                     albedo: [0.94, 0.67, 0.12],
                 },
             ],
+            triangles: vec![Triangle {
+                // This triangle crosses the red sphere and extends past its silhouette.
+                vertices: [[-2.35, 0.30, 0.50], [0.25, 0.50, 0.50], [-0.95, 2.28, 0.50]],
+                albedo: [0.12, 0.76, 0.38],
+            }],
         }
     }
 }

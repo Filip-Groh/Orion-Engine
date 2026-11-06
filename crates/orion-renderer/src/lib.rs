@@ -1,4 +1,4 @@
-//! Windowed Vulkan compute renderer for signed distance fields.
+//! Windowed Vulkan compute renderer for signed distance fields and triangles.
 
 mod device;
 mod swapchain;
@@ -18,19 +18,27 @@ use swapchain::{PresentImage, Swapchain};
 const WORKGROUP_SIZE: u32 = 8;
 const SHADER: &[u8] = include_bytes!(concat!(env!("OUT_DIR"), "/raymarch.spv"));
 
-// Each field occupies one WGSL vec4 slot. The sphere array follows the header.
+// The WGSL geometry array follows the header, with spheres before triangles.
 #[repr(C)]
 #[derive(Clone, Copy, Pod, Zeroable)]
 struct SceneHeader {
     eye_and_fov_scale: [f32; 4],
     look_at: [f32; 4],
-    extent_count: [u32; 4],
+    extent_format: [u32; 4],
+    geometry_counts: [u32; 4],
 }
 
 #[repr(C)]
 #[derive(Clone, Copy, Pod, Zeroable)]
 struct GpuSphere {
     center_radius: [f32; 4],
+    albedo: [f32; 4],
+}
+
+#[repr(C)]
+#[derive(Clone, Copy, Pod, Zeroable)]
+struct GpuTriangle {
+    vertices: [[f32; 4]; 3],
     albedo: [f32; 4],
 }
 
@@ -466,20 +474,24 @@ fn pack_scene(
     );
 
     let sphere_count = scene.spheres.len();
-    // A runtime array binding needs space for at least one element even when the count is zero.
-    let slots = sphere_count.max(1);
+    let triangle_count = scene.triangles.len();
     let header_size = size_of::<SceneHeader>();
-    let sphere_size = size_of::<GpuSphere>();
+    // The runtime array needs one vec4 even when both geometry lists are empty.
+    let geometry_bytes = sphere_count
+        .saturating_mul(size_of::<GpuSphere>())
+        .saturating_add(triangle_count.saturating_mul(size_of::<GpuTriangle>()))
+        .max(size_of::<[f32; 4]>());
     ensure!(
-        slots <= max_bytes.saturating_sub(header_size) / sphere_size,
+        geometry_bytes <= max_bytes.saturating_sub(header_size),
         "scene exceeds the device's storage buffer limit"
     );
     let header = SceneHeader {
         eye_and_fov_scale: [x, y, z, (0.5 * fov.to_radians()).tan()],
         look_at: [tx, ty, tz, 0.0],
-        extent_count: [width, height, sphere_count as u32, u32::from(bgra)],
+        extent_format: [width, height, u32::from(bgra), 0],
+        geometry_counts: [sphere_count as u32, triangle_count as u32, 0, 0],
     };
-    let mut bytes = Vec::with_capacity(header_size + slots * sphere_size);
+    let mut bytes = Vec::with_capacity(header_size + geometry_bytes);
     bytes.extend_from_slice(bytes_of(&header));
     for sphere in &scene.spheres {
         ensure!(
@@ -503,6 +515,26 @@ fn pack_scene(
         };
         bytes.extend_from_slice(bytes_of(&sphere));
     }
-    bytes.resize(header_size + slots * sphere_size, 0);
+    for triangle in &scene.triangles {
+        ensure!(
+            triangle
+                .vertices
+                .iter()
+                .flatten()
+                .all(|coordinate| coordinate.is_finite())
+                && triangle
+                    .albedo
+                    .iter()
+                    .all(|color| (0.0..=1.0).contains(color)),
+            "triangles require finite vertices and albedo in 0..=1"
+        );
+        let [r, g, b] = triangle.albedo;
+        let triangle = GpuTriangle {
+            vertices: triangle.vertices.map(|[x, y, z]| [x, y, z, 0.0]),
+            albedo: [r, g, b, 0.0],
+        };
+        bytes.extend_from_slice(bytes_of(&triangle));
+    }
+    bytes.resize(header_size + geometry_bytes, 0);
     Ok(bytes)
 }
