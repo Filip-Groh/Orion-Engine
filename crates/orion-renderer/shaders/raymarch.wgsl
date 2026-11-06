@@ -10,8 +10,8 @@ struct Scene {
     look_at: vec4<f32>,
     extent_format: vec4<u32>,
     geometry_counts: vec4<u32>,
-    // Two vec4s per sphere, followed by four vec4s per triangle.
-    geometry: array<vec4<f32>>,
+    // Two vec4s per sphere, four per triangle, then two per BVH node.
+    geometry: array<vec4<u32>>,
 }
 
 struct Surface {
@@ -37,10 +37,10 @@ fn sample_scene(p: vec3<f32>) -> Surface {
     var closest = Surface(p.y, vec3<f32>(gray));
     for (var i = 0u; i < scene.geometry_counts.x; i++) {
         let offset = 2u * i;
-        let center_radius = scene.geometry[offset];
+        let center_radius = bitcast<vec4<f32>>(scene.geometry[offset]);
         let distance = length(p - center_radius.xyz) - center_radius.w;
         if distance < closest.distance {
-            closest = Surface(distance, scene.geometry[offset + 1u].xyz);
+            closest = Surface(distance, bitcast<vec3<f32>>(scene.geometry[offset + 1u].xyz));
         }
     }
     return closest;
@@ -60,8 +60,10 @@ fn march(origin: vec3<f32>, direction: vec3<f32>, limit: f32) -> f32 {
 
 fn triangle_at(index: u32) -> Triangle {
     let offset = 2u * scene.geometry_counts.x + 4u * index;
-    return Triangle(scene.geometry[offset].xyz, scene.geometry[offset + 1u].xyz,
-                    scene.geometry[offset + 2u].xyz, scene.geometry[offset + 3u].xyz);
+    return Triangle(bitcast<vec3<f32>>(scene.geometry[offset].xyz),
+                    bitcast<vec3<f32>>(scene.geometry[offset + 1u].xyz),
+                    bitcast<vec3<f32>>(scene.geometry[offset + 2u].xyz),
+                    bitcast<vec3<f32>>(scene.geometry[offset + 3u].xyz));
 }
 
 // Front-face Möller–Trumbore intersection. FAR represents a miss.
@@ -87,15 +89,56 @@ fn triangle_distance(origin: vec3<f32>, direction: vec3<f32>, triangle: Triangle
     return dot(ac, q) / determinant;
 }
 
-fn trace_scene(origin: vec3<f32>, direction: vec3<f32>) -> RayHit {
-    var closest = RayHit(FAR, NO_TRIANGLE);
-    for (var i = 0u; i < scene.geometry_counts.y; i++) {
-        let distance = triangle_distance(origin, direction, triangle_at(i));
-        if distance > 0.0 && distance < closest.distance {
-            closest = RayHit(distance, i);
-        }
+fn intersects_bounds(origin: vec3<f32>, inverse_direction: vec3<f32>, parallel: vec3<bool>,
+                     lower: vec3<f32>, upper: vec3<f32>, limit: f32) -> bool {
+    if any(parallel & (origin < lower)) || any(parallel & (origin > upper)) {
+        return false;
     }
+    let a = (lower - origin) * inverse_direction;
+    let b = (upper - origin) * inverse_direction;
+    let near = select(min(a, b), vec3<f32>(0.0), parallel);
+    let far = select(max(a, b), vec3<f32>(limit), parallel);
+    let enter = max(0.0, max(near.x, max(near.y, near.z)));
+    let exit = min(limit, min(far.x, min(far.y, far.z)));
+    // Keep the test inclusive for flat bounds and allow for rounding at the exit.
+    return enter <= exit * 1.000001;
+}
 
+fn trace_meshes(origin: vec3<f32>, direction: vec3<f32>) -> RayHit {
+    var closest = RayHit(FAR, NO_TRIANGLE);
+    let parallel = direction == vec3<f32>(0.0);
+    let inverse_direction = 1.0 / select(direction, vec3<f32>(1.0), parallel);
+    let nodes_start = 2u * scene.geometry_counts.x + 4u * scene.geometry_counts.y;
+    var node = 0u;
+    while node < scene.geometry_counts.z {
+        let offset = nodes_start + 2u * node;
+        let lower = scene.geometry[offset];
+        let upper = scene.geometry[offset + 1u];
+        let first_or_escape = lower.w;
+        let count = upper.w;
+        if intersects_bounds(origin, inverse_direction, parallel, bitcast<vec3<f32>>(lower.xyz),
+                             bitcast<vec3<f32>>(upper.xyz), closest.distance) {
+            let end = first_or_escape + count;
+            for (var i = first_or_escape; i < end; i++) {
+                let distance = triangle_distance(origin, direction, triangle_at(i));
+                // Retain scene order when two triangles hit at the same distance.
+                if distance > 0.0 && distance < FAR &&
+                   (distance < closest.distance ||
+                    (distance == closest.distance && i < closest.triangle_index)) {
+                    closest = RayHit(distance, i);
+                }
+            }
+        } else if count == 0u {
+            node = first_or_escape;
+            continue;
+        }
+        node += 1u;
+    }
+    return closest;
+}
+
+fn trace_scene(origin: vec3<f32>, direction: vec3<f32>) -> RayHit {
+    let closest = trace_meshes(origin, direction);
     let distance = march(origin, direction, closest.distance);
     if distance < closest.distance {
         return RayHit(distance, NO_TRIANGLE);

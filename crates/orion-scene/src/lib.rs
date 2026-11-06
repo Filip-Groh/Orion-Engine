@@ -30,15 +30,21 @@ pub struct Triangle {
     pub albedo: [f32; 3],
 }
 
+/// One mesh object, represented by its world-space triangles.
+#[derive(Clone, Debug)]
+pub struct Mesh {
+    pub triangles: Vec<Triangle>,
+}
+
 #[derive(Clone, Debug)]
 pub struct Scene {
     pub camera: Camera,
     pub spheres: Vec<Sphere>,
-    pub triangles: Vec<Triangle>,
+    pub meshes: Vec<Mesh>,
 }
 
 impl Scene {
-    /// Appends the faces of a Wavefront OBJ in their original coordinates and winding.
+    /// Appends a Wavefront OBJ as one mesh in its original coordinates and winding.
     /// The renderer uses the supplied albedo and computes flat normals from the faces.
     pub fn import_obj(&mut self, path: impl AsRef<Path>, albedo: [f32; 3]) -> Result<()> {
         let path = path.as_ref();
@@ -46,12 +52,20 @@ impl Scene {
             fs::read_to_string(path).with_context(|| format!("read {}", path.display()))?;
         let triangles =
             obj::parse(&source, albedo).with_context(|| format!("import {}", path.display()))?;
-        self.triangles.extend(triangles);
+        self.meshes.push(Mesh { triangles });
         Ok(())
     }
 
     pub fn demo() -> Self {
-        let mut scene = Self {
+        let mut suzanne = obj::parse(include_str!("../assets/monkey.obj"), [0.68, 0.36, 0.12])
+            .expect("bundled Suzanne OBJ is valid");
+        for triangle in &mut suzanne {
+            triangle.vertices = triangle
+                .vertices
+                .map(|[x, y, z]| [0.75 * x + 1.85, 0.75 * y + 0.85, 0.75 * z - 1.25]);
+        }
+
+        Self {
             camera: Camera {
                 eye: [3.4, 2.5, 5.0],
                 target: [0.0, 0.7, 0.0],
@@ -74,22 +88,16 @@ impl Scene {
                     albedo: [0.94, 0.67, 0.12],
                 },
             ],
-            triangles: vec![Triangle {
-                // This triangle crosses the red sphere and extends past its silhouette.
-                vertices: [[-2.35, 0.30, 0.50], [0.25, 0.50, 0.50], [-0.95, 2.28, 0.50]],
-                albedo: [0.12, 0.76, 0.38],
-            }],
-        };
-        let suzanne = obj::parse(include_str!("../assets/monkey.obj"), [0.68, 0.36, 0.12])
-            .expect("bundled Suzanne OBJ is valid");
-        scene
-            .triangles
-            .extend(suzanne.into_iter().map(|mut triangle| {
-                triangle.vertices = triangle
-                    .vertices
-                    .map(|[x, y, z]| [0.75 * x + 1.85, 0.75 * y + 0.85, 0.75 * z - 1.25]);
-                triangle
-            }));
-        scene
+            meshes: vec![
+                Mesh {
+                    triangles: vec![Triangle {
+                        // This triangle crosses the red sphere and extends past its silhouette.
+                        vertices: [[-2.35, 0.30, 0.50], [0.25, 0.50, 0.50], [-0.95, 2.28, 0.50]],
+                        albedo: [0.12, 0.76, 0.38],
+                    }],
+                },
+                Mesh { triangles: suzanne },
+            ],
+        }
     }
 }

@@ -1,5 +1,6 @@
 //! Windowed Vulkan compute renderer for signed distance fields and triangles.
 
+mod bvh;
 mod device;
 mod overlay;
 mod swapchain;
@@ -8,10 +9,11 @@ use std::io::Cursor;
 
 use anyhow::{Context, Result, ensure};
 use ash::vk;
-use bytemuck::{Pod, Zeroable, bytes_of};
+use bytemuck::{Pod, Zeroable, bytes_of, cast_slice};
 use orion_scene::Scene;
 use raw_window_handle::{HasDisplayHandle, HasWindowHandle};
 
+use bvh::BvhNode;
 use device::{ComputeDevice, StorageBuffer};
 use overlay::{Overlay, OverlayFrame};
 use swapchain::Swapchain;
@@ -20,7 +22,7 @@ use swapchain::Swapchain;
 const WORKGROUP_SIZE: u32 = 8;
 const SHADER: &[u8] = include_bytes!(concat!(env!("OUT_DIR"), "/raymarch.spv"));
 
-// The WGSL geometry array follows the header, with spheres before triangles.
+// The WGSL geometry array follows the header in sphere, triangle, BVH node order.
 #[repr(C)]
 #[derive(Clone, Copy, Pod, Zeroable)]
 struct SceneHeader {
@@ -581,12 +583,19 @@ fn pack_scene(
     );
 
     let sphere_count = scene.spheres.len();
-    let triangle_count = scene.triangles.len();
+    let triangle_count: usize = scene.meshes.iter().map(|mesh| mesh.triangles.len()).sum();
+    let mesh_count = scene
+        .meshes
+        .iter()
+        .filter(|mesh| !mesh.triangles.is_empty())
+        .count();
+    let node_count = bvh::node_count(mesh_count);
     let header_size = size_of::<SceneHeader>();
-    // The runtime array needs one vec4 even when both geometry lists are empty.
+    // The runtime array needs one vec4 even when the scene has no geometry.
     let geometry_bytes = sphere_count
         .saturating_mul(size_of::<GpuSphere>())
         .saturating_add(triangle_count.saturating_mul(size_of::<GpuTriangle>()))
+        .saturating_add(node_count.saturating_mul(size_of::<BvhNode>()))
         .max(size_of::<[f32; 4]>());
     ensure!(
         geometry_bytes <= max_bytes.saturating_sub(header_size),
@@ -596,7 +605,12 @@ fn pack_scene(
         eye_and_fov_scale: [x, y, z, (0.5 * fov.to_radians()).tan()],
         look_at: [tx, ty, tz, 0.0],
         extent_format: [width, height, u32::from(bgra), 0],
-        geometry_counts: [sphere_count as u32, triangle_count as u32, 0, 0],
+        geometry_counts: [
+            sphere_count as u32,
+            triangle_count as u32,
+            node_count as u32,
+            0,
+        ],
     };
     let mut bytes = Vec::with_capacity(header_size + geometry_bytes);
     bytes.extend_from_slice(bytes_of(&header));
@@ -622,26 +636,42 @@ fn pack_scene(
         };
         bytes.extend_from_slice(bytes_of(&sphere));
     }
-    for triangle in &scene.triangles {
-        ensure!(
-            triangle
-                .vertices
-                .iter()
-                .flatten()
-                .all(|coordinate| coordinate.is_finite())
-                && triangle
-                    .albedo
+    let mut leaves = Vec::with_capacity(mesh_count);
+    let mut first_triangle = 0;
+    for mesh in scene
+        .meshes
+        .iter()
+        .filter(|mesh| !mesh.triangles.is_empty())
+    {
+        let count = mesh.triangles.len() as u32;
+        let mut leaf = BvhNode::new(first_triangle, count);
+        for triangle in &mesh.triangles {
+            ensure!(
+                triangle
+                    .vertices
                     .iter()
-                    .all(|color| (0.0..=1.0).contains(color)),
-            "triangles require finite vertices and albedo in 0..=1"
-        );
-        let [r, g, b] = triangle.albedo;
-        let triangle = GpuTriangle {
-            vertices: triangle.vertices.map(|[x, y, z]| [x, y, z, 0.0]),
-            albedo: [r, g, b, 0.0],
-        };
-        bytes.extend_from_slice(bytes_of(&triangle));
+                    .flatten()
+                    .all(|coordinate| coordinate.is_finite())
+                    && triangle
+                        .albedo
+                        .iter()
+                        .all(|color| (0.0..=1.0).contains(color)),
+                "triangles require finite vertices and albedo in 0..=1"
+            );
+            for vertex in triangle.vertices {
+                leaf.include(vertex);
+            }
+            let [r, g, b] = triangle.albedo;
+            let triangle = GpuTriangle {
+                vertices: triangle.vertices.map(|[x, y, z]| [x, y, z, 0.0]),
+                albedo: [r, g, b, 0.0],
+            };
+            bytes.extend_from_slice(bytes_of(&triangle));
+        }
+        leaves.push(leaf);
+        first_triangle += count;
     }
+    bytes.extend_from_slice(cast_slice(&bvh::build(&mut leaves)));
     bytes.resize(header_size + geometry_bytes, 0);
     Ok(bytes)
 }
