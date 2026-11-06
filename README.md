@@ -10,7 +10,7 @@ Use a recent stable Rust toolchain and a Vulkan 1.1 driver with graphics, comput
 cargo run
 ```
 
-The demo renders three spheres and the bundled Suzanne OBJ over a checkerboard plane, with a green triangle passing through the red sphere. Triangles are visible from the side where their vertices wind counterclockwise. The resizable window starts at a logical size of 960 × 540. The egui overlay in the top-left corner shows the frame rate, averaged over half-second intervals.
+The demo renders three spheres and the bundled Suzanne OBJ over a checkerboard plane, with a green triangle passing through the red sphere. Triangles are visible from the side where their vertices wind counterclockwise. The resizable window starts at a logical size of 960 × 540. The egui overlay in the top-left corner shows presented frames per second (FPS) and completed simulation ticks per second (TPS), sampled over roughly half-second intervals.
 
 Pass an OBJ file to add it to the demo scene in its original coordinates. Orion triangulates polygon faces and shades them with a uniform color and flat face normals. Prepare the mesh for a Y-up scene and place it in view of the demo camera.
 
@@ -21,6 +21,8 @@ cargo run -- path/to/mesh.obj
 The demo prefers Vulkan's immediate present mode for uncapped FPS measurements. It uses mailbox mode when immediate mode is unavailable and falls back to refresh-synced FIFO when the surface offers neither mode.
 
 Click inside the window to capture the mouse for freecam. Move the mouse to look around, use **W/A/S/D** to fly, and use **Space/Ctrl** to rise or descend. Hold **Shift** to move faster. Press **Esc** to release the cursor.
+
+The simulation advances at a fixed 60 TPS. Freecam key changes and mouse deltas are queued for the next tick when the event loop receives them. Given the same starting camera and ordered inputs per tick, the simulation produces the same camera state regardless of redraw timing.
 
 ## Workspace
 

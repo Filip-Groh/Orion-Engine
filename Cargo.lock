@@ -1232,6 +1232,7 @@ version = "0.1.0"
 dependencies = [
  "anyhow",
  "egui",
+ "libm",
  "orion-renderer",
  "orion-scene",
  "winit",

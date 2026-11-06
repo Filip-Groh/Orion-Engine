@@ -1,19 +1,24 @@
+use std::time::Instant;
+
 use anyhow::Context;
 use orion_renderer::Renderer;
-use orion_scene::Scene;
 use winit::{
     application::ApplicationHandler,
     dpi::LogicalSize,
-    event::{DeviceEvent, DeviceId, ElementState, KeyEvent, MouseButton, WindowEvent},
-    event_loop::ActiveEventLoop,
+    event::{DeviceEvent, DeviceId, ElementState, KeyEvent, MouseButton, StartCause, WindowEvent},
+    event_loop::{ActiveEventLoop, ControlFlow},
     keyboard::{KeyCode, PhysicalKey},
-    window::{Window, WindowId},
+    window::{CursorGrabMode, Window, WindowId},
 };
 
 use super::App;
-use crate::{fps::FpsCounter, freecam::Freecam};
+use crate::{freecam::FreecamInput, rates::RateCounter};
 
 impl ApplicationHandler for App {
+    fn new_events(&mut self, event_loop: &ActiveEventLoop, _: StartCause) {
+        self.run_due_ticks(event_loop);
+    }
+
     fn resumed(&mut self, event_loop: &ActiveEventLoop) {
         if self.renderer.is_some() {
             return;
@@ -32,6 +37,7 @@ impl ApplicationHandler for App {
             Ok(renderer) => {
                 renderer.window().request_redraw();
                 self.renderer = Some(renderer);
+                self.start_simulation(Instant::now());
             }
             Err(error) => {
                 self.error = Some(error);
@@ -41,11 +47,16 @@ impl ApplicationHandler for App {
     }
 
     fn device_event(&mut self, _: &ActiveEventLoop, _: DeviceId, event: DeviceEvent) {
-        if let (Some(renderer), DeviceEvent::MouseMotion { delta }) = (&self.renderer, event)
-            && let Ok(camera) = self.scene.camera_mut()
-            && self.freecam.look(camera, delta)
+        if self.cursor_captured
+            && let DeviceEvent::MouseMotion { delta: (dx, dy) } = event
         {
-            renderer.window().request_redraw();
+            self.queue_input(
+                Instant::now(),
+                FreecamInput::Look {
+                    dx: dx as f32,
+                    dy: dy as f32,
+                },
+            );
         }
     }
 
@@ -64,16 +75,16 @@ impl ApplicationHandler for App {
                 button: MouseButton::Left,
                 ..
             } => {
-                self.freecam.capture(renderer.window());
+                self.capture_cursor();
             }
             WindowEvent::Focused(false) => {
-                self.freecam.release(renderer.window());
+                self.release_cursor();
             }
             WindowEvent::Occluded(occluded) => {
                 self.occluded = occluded;
                 if occluded {
-                    self.freecam.release(renderer.window());
-                    self.fps = FpsCounter::default();
+                    self.release_cursor();
+                    self.fps = RateCounter::default();
                 } else {
                     renderer.window().request_redraw();
                 }
@@ -82,8 +93,16 @@ impl ApplicationHandler for App {
                 event,
                 is_synthetic: false,
                 ..
-            } => handle_key(renderer.window(), &mut self.freecam, &mut self.scene, event),
-            WindowEvent::Resized(_) | WindowEvent::ScaleFactorChanged { .. } => {
+            } => self.handle_key(event),
+            WindowEvent::Resized(size) => {
+                let window = renderer.window();
+                window.request_redraw();
+                if size.width == 0 || size.height == 0 || window.is_minimized() == Some(true) {
+                    self.release_cursor();
+                    self.fps = RateCounter::default();
+                }
+            }
+            WindowEvent::ScaleFactorChanged { .. } => {
                 renderer.window().request_redraw();
             }
             WindowEvent::RedrawRequested => {
@@ -96,6 +115,13 @@ impl ApplicationHandler for App {
         }
     }
 
+    fn about_to_wait(&mut self, event_loop: &ActiveEventLoop) {
+        self.run_due_ticks(event_loop);
+        event_loop.set_control_flow(self.clock.as_ref().map_or(ControlFlow::Wait, |clock| {
+            ControlFlow::WaitUntil(clock.next_deadline())
+        }));
+    }
+
     fn suspended(&mut self, _event_loop: &ActiveEventLoop) {
         self.drop_renderer();
     }
@@ -105,19 +131,66 @@ impl ApplicationHandler for App {
     }
 }
 
-fn handle_key(window: &Window, freecam: &mut Freecam, scene: &mut Scene, event: KeyEvent) {
-    let PhysicalKey::Code(key) = event.physical_key else {
-        return;
-    };
-    if event.repeat {
-        return;
+impl App {
+    fn run_due_ticks(&mut self, event_loop: &ActiveEventLoop) {
+        if !event_loop.exiting()
+            && let Err(error) = self.advance_simulation(Instant::now())
+        {
+            self.error = Some(error);
+            event_loop.exit();
+        }
     }
-    let pressed = event.state.is_pressed();
-    if key == KeyCode::Escape && pressed {
-        freecam.release(window);
-    } else if let Ok(camera) = scene.camera_mut()
-        && freecam.set_key(camera, key, pressed)
-    {
-        window.request_redraw();
+
+    fn capture_cursor(&mut self) {
+        let Some(renderer) = &self.renderer else {
+            return;
+        };
+        if self.cursor_captured {
+            return;
+        }
+        let window = renderer.window();
+        match window
+            .set_cursor_grab(CursorGrabMode::Locked)
+            .or_else(|_| window.set_cursor_grab(CursorGrabMode::Confined))
+        {
+            Ok(()) => {
+                self.cursor_captured = true;
+                window.set_cursor_visible(false);
+            }
+            Err(error) => eprintln!("Could not capture the cursor: {error}"),
+        }
+    }
+
+    pub(super) fn release_cursor(&mut self) {
+        if !self.cursor_captured {
+            return;
+        }
+        let now = Instant::now();
+        if let Some(renderer) = &self.renderer {
+            let window = renderer.window();
+            let _ = window.set_cursor_grab(CursorGrabMode::None);
+            window.set_cursor_visible(true);
+        }
+        self.cursor_captured = false;
+        self.queue_input(now, FreecamInput::ReleaseAll);
+    }
+
+    fn handle_key(&mut self, event: KeyEvent) {
+        use KeyCode::*;
+        let PhysicalKey::Code(key) = event.physical_key else {
+            return;
+        };
+        if event.repeat || !self.cursor_captured {
+            return;
+        }
+        let pressed = event.state.is_pressed();
+        if key == Escape && pressed {
+            self.release_cursor();
+        } else if matches!(
+            key,
+            KeyW | KeyA | KeyS | KeyD | Space | ControlLeft | ControlRight | ShiftLeft | ShiftRight
+        ) {
+            self.queue_input(Instant::now(), FreecamInput::Key { key, pressed });
+        }
     }
 }

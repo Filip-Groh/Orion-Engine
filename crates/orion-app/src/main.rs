@@ -1,6 +1,7 @@
 mod app;
-mod fps;
 mod freecam;
+mod rates;
+mod tick;
 
 use std::env;
 
