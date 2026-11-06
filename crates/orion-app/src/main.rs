@@ -1,6 +1,8 @@
+mod fps;
 mod freecam;
 
 use anyhow::{Context, Result};
+use fps::FpsCounter;
 use freecam::Freecam;
 use orion_renderer::Renderer;
 use orion_scene::Scene;
@@ -17,6 +19,8 @@ struct App {
     renderer: Option<Renderer<Window>>,
     scene: Scene,
     freecam: Freecam,
+    fps: FpsCounter,
+    occluded: bool,
     error: Option<anyhow::Error>,
 }
 
@@ -25,6 +29,8 @@ impl App {
         if let Some(renderer) = self.renderer.take() {
             self.freecam.release(renderer.window());
         }
+        self.fps = FpsCounter::default();
+        self.occluded = false;
     }
 }
 
@@ -40,7 +46,9 @@ impl ApplicationHandler for App {
                     .with_inner_size(LogicalSize::new(960, 540)),
             )
             .context("create the Orion window")
-            .and_then(|window| Renderer::new(window).context("initialize the Vulkan renderer"));
+            .and_then(|window| {
+                Renderer::new_with_overlay(window).context("initialize the Vulkan renderer")
+            });
         match renderer {
             Ok(renderer) => {
                 renderer.window().request_redraw();
@@ -78,8 +86,17 @@ impl ApplicationHandler for App {
             } => {
                 self.freecam.capture(renderer.window());
             }
-            WindowEvent::Focused(false) | WindowEvent::Occluded(true) => {
+            WindowEvent::Focused(false) => {
                 self.freecam.release(renderer.window());
+            }
+            WindowEvent::Occluded(occluded) => {
+                self.occluded = occluded;
+                if occluded {
+                    self.freecam.release(renderer.window());
+                    self.fps = FpsCounter::default();
+                } else {
+                    renderer.window().request_redraw();
+                }
             }
             WindowEvent::KeyboardInput {
                 event,
@@ -95,28 +112,35 @@ impl ApplicationHandler for App {
                     }
                 }
             }
-            WindowEvent::Resized(_)
-            | WindowEvent::ScaleFactorChanged { .. }
-            | WindowEvent::Occluded(false) => {
+            WindowEvent::Resized(_) | WindowEvent::ScaleFactorChanged { .. } => {
                 renderer.window().request_redraw();
             }
             WindowEvent::RedrawRequested => {
                 let size = renderer.window().inner_size();
-                if size.width == 0
+                if self.occluded
+                    || size.width == 0
                     || size.height == 0
                     || renderer.window().is_minimized() == Some(true)
                 {
                     self.freecam.release(renderer.window());
+                    self.fps = FpsCounter::default();
                     return;
                 }
-                let moving = self.freecam.step(&mut self.scene.camera);
-                match renderer.render(
+                self.freecam.step(&mut self.scene.camera);
+                let scale = renderer.window().scale_factor() as f32;
+                match renderer.render_with_overlay(
                     &self.scene,
                     [size.width, size.height],
+                    scale,
+                    |ui| self.fps.draw(ui),
                     Window::pre_present_notify,
                 ) {
-                    Ok(retry) if retry || moving => renderer.window().request_redraw(),
-                    Ok(_) => {}
+                    Ok(presented) => {
+                        if presented {
+                            self.fps.presented();
+                        }
+                        renderer.window().request_redraw();
+                    }
                     Err(error) => {
                         self.error = Some(error.context("render the demo scene"));
                         event_loop.exit();
@@ -142,6 +166,8 @@ fn main() -> Result<()> {
     let mut app = App {
         renderer: None,
         freecam: Freecam::new(&scene.camera),
+        fps: FpsCounter::default(),
+        occluded: false,
         scene,
         error: None,
     };

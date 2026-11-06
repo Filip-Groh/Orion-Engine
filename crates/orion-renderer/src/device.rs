@@ -7,7 +7,7 @@ use anyhow::{Context, Result};
 use ash::{Entry, khr, vk};
 use raw_window_handle::{HasDisplayHandle, HasWindowHandle};
 
-use crate::swapchain::choose_format;
+use crate::swapchain::{choose_format, image_usage};
 
 pub(crate) struct Surface {
     pub instance: ash::Instance,
@@ -79,7 +79,7 @@ pub(crate) struct ComputeDevice {
 }
 
 impl ComputeDevice {
-    pub fn new(window: &(impl HasDisplayHandle + HasWindowHandle)) -> Result<Self> {
+    pub fn new(window: &(impl HasDisplayHandle + HasWindowHandle), overlay: bool) -> Result<Self> {
         let surface = Surface::new(window)?;
         let devices = unsafe { surface.instance.enumerate_physical_devices() }
             .context("enumerate Vulkan devices")?;
@@ -102,7 +102,9 @@ impl ComputeDevice {
             if !supports(khr::swapchain::NAME) {
                 continue;
             }
-            let Some((compute_family, present_family)) = queue_families(&surface, physical)? else {
+            let Some((compute_family, present_family)) =
+                queue_families(&surface, physical, overlay)?
+            else {
                 continue;
             };
             let capabilities = unsafe {
@@ -119,7 +121,7 @@ impl ComputeDevice {
             .context("query Vulkan surface formats")?;
             if !capabilities
                 .supported_usage_flags
-                .contains(vk::ImageUsageFlags::TRANSFER_DST)
+                .contains(image_usage(overlay))
                 || choose_format(&formats).is_none()
             {
                 continue;
@@ -163,18 +165,31 @@ impl ComputeDevice {
                 memory,
             });
         }
+        if overlay {
+            anyhow::bail!(
+                "no Vulkan 1.1 device supports the graphics, compute, and swapchain usage required for the egui overlay"
+            );
+        }
         anyhow::bail!(
             "no Vulkan 1.1 device can compute and present to an RGBA8 or BGRA8 swapchain with transfer support"
         )
     }
 }
 
-fn queue_families(surface: &Surface, physical: vk::PhysicalDevice) -> Result<Option<(u32, u32)>> {
+fn queue_families(
+    surface: &Surface,
+    physical: vk::PhysicalDevice,
+    overlay: bool,
+) -> Result<Option<(u32, u32)>> {
     let families = unsafe {
         surface
             .instance
             .get_physical_device_queue_family_properties(physical)
     };
+    let mut required = vk::QueueFlags::COMPUTE;
+    if overlay {
+        required |= vk::QueueFlags::GRAPHICS;
+    }
     let mut compute = None;
     let mut present = None;
     for (index, family) in families
@@ -183,17 +198,17 @@ fn queue_families(surface: &Surface, physical: vk::PhysicalDevice) -> Result<Opt
         .filter(|(_, family)| family.queue_count > 0)
     {
         let index = index as u32;
-        let can_compute = family.queue_flags.contains(vk::QueueFlags::COMPUTE);
+        let can_render = family.queue_flags.contains(required);
         let can_present = unsafe {
             surface
                 .loader
                 .get_physical_device_surface_support(physical, index, surface.handle)
         }
         .context("query Vulkan queue presentation support")?;
-        if can_compute && can_present {
+        if can_render && can_present {
             return Ok(Some((index, index)));
         }
-        if can_compute {
+        if can_render {
             compute.get_or_insert(index);
         }
         if can_present {

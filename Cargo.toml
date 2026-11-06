@@ -12,6 +12,9 @@ anyhow = "1"
 ash = "0.38"
 ash-window = "0.13"
 bytemuck = { version = "1", features = ["derive"] }
+# Match the egui types used by egui-ash-renderer.
+egui = "0.36"
+egui-ash-renderer = "0.13"
 naga = { version = "30.0.1", features = ["wgsl-in", "spv-out"] }
 raw-window-handle = "0.6"
 winit = "0.30"

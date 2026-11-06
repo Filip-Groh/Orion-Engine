@@ -1,6 +1,7 @@
 //! Windowed Vulkan compute renderer for signed distance fields and triangles.
 
 mod device;
+mod overlay;
 mod swapchain;
 
 use std::io::Cursor;
@@ -12,7 +13,8 @@ use orion_scene::Scene;
 use raw_window_handle::{HasDisplayHandle, HasWindowHandle};
 
 use device::{ComputeDevice, StorageBuffer};
-use swapchain::{PresentImage, Swapchain};
+use overlay::{Overlay, OverlayFrame};
+use swapchain::Swapchain;
 
 // Matches @workgroup_size in raymarch.wgsl.
 const WORKGROUP_SIZE: u32 = 8;
@@ -45,6 +47,8 @@ struct GpuTriangle {
 pub struct Renderer<W> {
     swapchain: Option<Swapchain>,
     swapchain_dirty: bool,
+    overlay_enabled: bool,
+    overlay: Option<Overlay>,
     dispatch: Dispatch,
     descriptor_layout: vk::DescriptorSetLayout,
     pipeline_layout: vk::PipelineLayout,
@@ -53,12 +57,28 @@ pub struct Renderer<W> {
     window: W,
 }
 
+enum FrameOutcome {
+    Skipped,
+    Retry,
+    Presented,
+}
+
 impl<W: HasDisplayHandle + HasWindowHandle> Renderer<W> {
     pub fn new(window: W) -> Result<Self> {
-        let device = ComputeDevice::new(&window)?;
+        Self::create(window, false)
+    }
+
+    pub fn new_with_overlay(window: W) -> Result<Self> {
+        Self::create(window, true)
+    }
+
+    fn create(window: W, overlay_enabled: bool) -> Result<Self> {
+        let device = ComputeDevice::new(&window, overlay_enabled)?;
         let mut renderer = Self {
             swapchain: None,
             swapchain_dirty: false,
+            overlay_enabled,
+            overlay: None,
             dispatch: Dispatch::new(&device)?,
             descriptor_layout: vk::DescriptorSetLayout::null(),
             pipeline_layout: vk::PipelineLayout::null(),
@@ -128,11 +148,48 @@ impl<W: HasDisplayHandle + HasWindowHandle> Renderer<W> {
     pub fn render(
         &mut self,
         scene: &Scene,
-        [width, height]: [u32; 2],
+        size: [u32; 2],
         before_present: impl FnOnce(&W),
     ) -> Result<bool> {
+        let result = self.render_frame(
+            scene,
+            size,
+            None::<(f32, fn(&mut egui::Ui))>,
+            before_present,
+        )?;
+        Ok(matches!(result, FrameOutcome::Retry))
+    }
+
+    /// Renders a passive egui overlay and returns whether the frame was presented.
+    pub fn render_with_overlay(
+        &mut self,
+        scene: &Scene,
+        size: [u32; 2],
+        scale: f32,
+        draw_ui: impl FnMut(&mut egui::Ui),
+        before_present: impl FnOnce(&W),
+    ) -> Result<bool> {
+        ensure!(
+            self.overlay_enabled,
+            "create the renderer with egui overlay support first"
+        );
+        ensure!(
+            scale.is_finite() && scale > 0.0,
+            "egui requires a positive finite scale factor"
+        );
+        let result = self.render_frame(scene, size, Some((scale, draw_ui)), before_present)?;
+        Ok(matches!(result, FrameOutcome::Presented))
+    }
+
+    fn render_frame(
+        &mut self,
+        scene: &Scene,
+        [width, height]: [u32; 2],
+        overlay: Option<(f32, impl FnMut(&mut egui::Ui))>,
+        before_present: impl FnOnce(&W),
+    ) -> Result<FrameOutcome> {
         if width == 0 || height == 0 {
-            return Ok(false);
+            return Ok(FrameOutcome::Skipped);
         }
         self.dispatch.wait()?;
         let requested_extent = vk::Extent2D { width, height };
@@ -145,7 +202,7 @@ impl<W: HasDisplayHandle + HasWindowHandle> Renderer<W> {
             self.recreate_swapchain(requested_extent)?;
         }
         let Some(swapchain) = &self.swapchain else {
-            return Ok(false);
+            return Ok(FrameOutcome::Skipped);
         };
         let vk::Extent2D { width, height } = swapchain.extent;
         let groups = [
@@ -189,17 +246,33 @@ impl<W: HasDisplayHandle + HasWindowHandle> Renderer<W> {
             Ok(image) => image,
             Err(vk::Result::ERROR_OUT_OF_DATE_KHR) => {
                 self.swapchain_dirty = true;
-                return Ok(true);
+                return Ok(FrameOutcome::Retry);
             }
-            Err(vk::Result::TIMEOUT | vk::Result::NOT_READY) => return Ok(true),
+            Err(vk::Result::TIMEOUT | vk::Result::NOT_READY) => return Ok(FrameOutcome::Retry),
             Err(error) => return Err(error).context("acquire a swapchain image"),
         };
-        let image = &swapchain.images[index as usize];
-        self.record(swapchain, image, groups)?;
-        self.dispatch
-            .submit(self.device.compute_queue, image.ready)?;
+        // Build egui only after acquisition so a retry cannot discard texture updates.
+        let overlay_frame = if let Some((scale, draw_ui)) = overlay {
+            let painter = self
+                .overlay
+                .as_mut()
+                .expect("egui renderer was initialized");
+            Some(painter.prepare(
+                self.device.compute_queue,
+                self.dispatch.command_pool,
+                swapchain.extent,
+                scale,
+                draw_ui,
+            )?)
+        } else {
+            None
+        };
+        let ready = swapchain.images[index as usize].ready;
+        self.record(index as usize, groups, overlay_frame)?;
+        self.dispatch.submit(self.device.compute_queue, ready)?;
 
-        let waits = [image.ready];
+        let swapchain = self.swapchain.as_ref().expect("swapchain was acquired");
+        let waits = [ready];
         let chains = [swapchain.handle];
         let indices = [index];
         let present = vk::PresentInfoKHR::default()
@@ -214,11 +287,11 @@ impl<W: HasDisplayHandle + HasWindowHandle> Renderer<W> {
         } {
             Ok(present_suboptimal) => {
                 self.swapchain_dirty = suboptimal || present_suboptimal;
-                Ok(false)
+                Ok(FrameOutcome::Presented)
             }
             Err(vk::Result::ERROR_OUT_OF_DATE_KHR) => {
                 self.swapchain_dirty = true;
-                Ok(true)
+                Ok(FrameOutcome::Retry)
             }
             Err(error) => Err(error).context("present the ray marched frame"),
         }
@@ -231,12 +304,30 @@ impl<W: HasDisplayHandle + HasWindowHandle> Renderer<W> {
         let old_handle = old
             .as_ref()
             .map_or(vk::SwapchainKHR::null(), |swapchain| swapchain.handle);
-        self.swapchain = Swapchain::new(&self.device, extent, old_handle)?;
+        self.swapchain = Swapchain::new(&self.device, extent, old_handle, self.overlay_enabled)?;
+        if let Some(target) = self
+            .swapchain
+            .as_ref()
+            .and_then(|swapchain| swapchain.overlay.as_ref())
+            && self
+                .overlay
+                .as_ref()
+                .is_none_or(|overlay| overlay.format != target.format)
+        {
+            self.overlay = Some(Overlay::new(&self.device, target)?);
+        }
         self.swapchain_dirty = false;
         Ok(())
     }
 
-    fn record(&self, swapchain: &Swapchain, image: &PresentImage, groups: [u32; 2]) -> Result<()> {
+    fn record(
+        &mut self,
+        index: usize,
+        groups: [u32; 2],
+        overlay: Option<OverlayFrame>,
+    ) -> Result<()> {
+        let swapchain = self.swapchain.as_ref().expect("swapchain was acquired");
+        let image = &swapchain.images[index];
         let device = &self.device.handle;
         let command = self.dispatch.command;
         let begin_info = vk::CommandBufferBeginInfo::default()
@@ -303,15 +394,31 @@ impl<W: HasDisplayHandle + HasWindowHandle> Renderer<W> {
                 vk::ImageLayout::TRANSFER_DST_OPTIMAL,
                 &[copy],
             );
-            device.cmd_pipeline_barrier(
-                command,
-                vk::PipelineStageFlags::TRANSFER,
-                vk::PipelineStageFlags::BOTTOM_OF_PIPE,
-                vk::DependencyFlags::empty(),
-                &[],
-                &[],
-                &[to_present],
-            );
+        }
+        if let Some(frame) = overlay {
+            let painter = self
+                .overlay
+                .as_mut()
+                .expect("egui renderer was initialized");
+            let target = swapchain
+                .overlay
+                .as_ref()
+                .expect("egui swapchain was initialized");
+            painter.record(command, target, index, swapchain.extent, frame)?;
+        } else {
+            unsafe {
+                device.cmd_pipeline_barrier(
+                    command,
+                    vk::PipelineStageFlags::TRANSFER,
+                    vk::PipelineStageFlags::BOTTOM_OF_PIPE,
+                    vk::DependencyFlags::empty(),
+                    &[],
+                    &[],
+                    &[to_present],
+                );
+            }
+        }
+        unsafe {
             device
                 .end_command_buffer(command)
                 .context("record the ray march dispatch")?;

@@ -8,6 +8,8 @@ anyhow.workspace = true
 ash.workspace = true
 ash-window.workspace = true
 bytemuck.workspace = true
+egui.workspace = true
+egui-ash-renderer.workspace = true
 orion-scene.workspace = true
 raw-window-handle.workspace = true
 

@@ -2,6 +2,7 @@ use anyhow::{Context, Result, ensure};
 use ash::{khr, vk};
 
 use crate::device::{ComputeDevice, StorageBuffer};
+use crate::overlay::OverlayTarget;
 
 pub(crate) struct PresentImage {
     pub handle: vk::Image,
@@ -15,6 +16,7 @@ pub(crate) struct Swapchain {
     pub requested_extent: vk::Extent2D,
     pub extent: vk::Extent2D,
     pub bgra: bool,
+    pub overlay: Option<OverlayTarget>,
     pub pixels: StorageBuffer,
     pub images: Vec<PresentImage>,
 }
@@ -24,6 +26,7 @@ impl Swapchain {
         device: &ComputeDevice,
         requested_extent: vk::Extent2D,
         old: vk::SwapchainKHR,
+        overlay: bool,
     ) -> Result<Option<Self>> {
         let surface = &device.surface;
         let capabilities = unsafe {
@@ -45,11 +48,10 @@ impl Swapchain {
         if extent.width == 0 || extent.height == 0 {
             return Ok(None);
         }
+        let usage = image_usage(overlay);
         ensure!(
-            capabilities
-                .supported_usage_flags
-                .contains(vk::ImageUsageFlags::TRANSFER_DST),
-            "the surface no longer supports transfer to swapchain images"
+            capabilities.supported_usage_flags.contains(usage),
+            "the surface no longer supports the required swapchain image usage {usage:?}"
         );
         let formats = unsafe {
             surface
@@ -58,6 +60,16 @@ impl Swapchain {
         }
         .context("query swapchain formats")?;
         let format = choose_format(&formats).context("no compatible 8-bit sRGB surface format")?;
+        let present_modes = unsafe {
+            surface
+                .loader
+                .get_physical_device_surface_present_modes(device.physical, surface.handle)
+        }
+        .context("query swapchain present modes")?;
+        let present_mode = [vk::PresentModeKHR::IMMEDIATE, vk::PresentModeKHR::MAILBOX]
+            .into_iter()
+            .find(|mode| present_modes.contains(mode))
+            .unwrap_or(vk::PresentModeKHR::FIFO);
         let alpha = [
             vk::CompositeAlphaFlagsKHR::OPAQUE,
             vk::CompositeAlphaFlagsKHR::INHERIT,
@@ -86,11 +98,11 @@ impl Swapchain {
             .image_color_space(format.color_space)
             .image_extent(extent)
             .image_array_layers(1)
-            .image_usage(vk::ImageUsageFlags::TRANSFER_DST)
+            .image_usage(usage)
             .image_sharing_mode(vk::SharingMode::EXCLUSIVE)
             .pre_transform(capabilities.current_transform)
             .composite_alpha(alpha)
-            .present_mode(vk::PresentModeKHR::FIFO)
+            .present_mode(present_mode)
             .clipped(true)
             .old_swapchain(old);
         if families[0] != families[1] {
@@ -111,6 +123,7 @@ impl Swapchain {
                 format.format,
                 vk::Format::B8G8R8A8_UNORM | vk::Format::B8G8R8A8_SRGB
             ),
+            overlay: None,
             pixels,
             images: Vec::new(),
         };
@@ -126,12 +139,21 @@ impl Swapchain {
             .context("create a presentation semaphore")?;
             swapchain.images.push(PresentImage { handle, ready });
         }
+        if overlay {
+            swapchain.overlay = Some(OverlayTarget::new(
+                &device.handle,
+                format.format,
+                extent,
+                swapchain.images.iter().map(|image| image.handle),
+            )?);
+        }
         Ok(Some(swapchain))
     }
 }
 
 impl Drop for Swapchain {
     fn drop(&mut self) {
+        self.overlay = None;
         unsafe {
             for image in &self.images {
                 self.device.destroy_semaphore(image.ready, None);
@@ -139,6 +161,14 @@ impl Drop for Swapchain {
             self.loader.destroy_swapchain(self.handle, None);
         }
     }
+}
+
+pub(crate) fn image_usage(overlay: bool) -> vk::ImageUsageFlags {
+    let mut usage = vk::ImageUsageFlags::TRANSFER_DST;
+    if overlay {
+        usage |= vk::ImageUsageFlags::COLOR_ATTACHMENT;
+    }
+    usage
 }
 
 pub(crate) fn choose_format(formats: &[vk::SurfaceFormatKHR]) -> Option<vk::SurfaceFormatKHR> {

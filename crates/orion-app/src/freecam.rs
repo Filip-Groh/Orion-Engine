@@ -95,10 +95,10 @@ impl Freecam {
         true
     }
 
-    /// Advances held movement and reports whether to request another frame.
-    pub fn step(&mut self, camera: &mut Camera) -> bool {
+    /// Advances held movement to the current time.
+    pub fn step(&mut self, camera: &mut Camera) {
         let Some(previous) = self.last_step else {
-            return false;
+            return;
         };
         let now = Instant::now();
         self.last_step = Some(now);
@@ -128,7 +128,6 @@ impl Freecam {
             *coordinate += direction * scale;
         }
         Self::aim(camera, forward);
-        true
     }
 
     fn axes(&self) -> [f32; 3] {

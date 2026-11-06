@@ -5,6 +5,7 @@ edition.workspace = true
 
 [dependencies]
 anyhow.workspace = true
+egui.workspace = true
 orion-renderer.workspace = true
 orion-scene.workspace = true
 winit.workspace = true
