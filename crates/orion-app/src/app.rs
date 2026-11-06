@@ -1,4 +1,5 @@
 mod events;
+mod input;
 
 use std::time::Instant;
 
@@ -56,14 +57,21 @@ impl App {
         self.tps.record(now, 0);
     }
 
+    fn replace_simulation(&mut self, simulation: Simulation, now: Instant) {
+        self.simulation = simulation;
+        self.previous = TransformSnapshot::default();
+        self.tps = RateCounter::default();
+        self.start_simulation(now);
+        if let Some(renderer) = &self.renderer {
+            renderer.window().request_redraw();
+        }
+    }
+
     fn queue_input(&mut self, now: Instant, input: FreecamInput) {
         if let Some(clock) = &self.clock
             && let Some(tick) = clock.due_tick(now).checked_add(1)
         {
-            let queue = &mut self.simulation.input;
-            // A checkpoint can already contain inputs scheduled beyond this boundary.
-            let index = queue.partition_point(|(queued_tick, _)| *queued_tick <= tick);
-            queue.insert(index, (tick, input));
+            self.simulation.queue_input(tick, input);
         }
     }
 
@@ -121,8 +129,7 @@ impl App {
         self.renderer = None;
         self.clock = None;
         self.previous = TransformSnapshot::default();
-        self.simulation.input.clear();
-        self.simulation.freecam.clear_keys();
+        self.simulation.clear_input();
         self.fps = RateCounter::default();
         self.tps = RateCounter::default();
         self.occluded = false;

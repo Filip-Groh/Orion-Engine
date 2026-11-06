@@ -1,9 +1,11 @@
 use std::io::Cursor;
 
-use anyhow::{Context, Result};
+use anyhow::{Context, Result, ensure};
 use ash::vk;
 
 const SHADER: &[u8] = include_bytes!(concat!(env!("OUT_DIR"), "/raymarch.spv"));
+// Matches @workgroup_size in raymarch.wgsl.
+const WORKGROUP_SIZE: u32 = 8;
 
 pub(super) struct Pipeline {
     device: ash::Device,
@@ -97,5 +99,33 @@ fn create_compute_pipeline(
             }
             Err(error).context("create the ray march compute pipeline")
         }
+    }
+}
+
+pub(super) fn dispatch_groups(extent: vk::Extent2D, limits: [u32; 3]) -> Result<[u32; 2]> {
+    let groups = [
+        extent.width.div_ceil(WORKGROUP_SIZE),
+        extent.height.div_ceil(WORKGROUP_SIZE),
+    ];
+    ensure!(
+        groups[0] <= limits[0] && groups[1] <= limits[1],
+        "render extent exceeds the device's compute dispatch limits"
+    );
+    Ok(groups)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn dispatch_rounds_up_and_checks_both_axis_limits() {
+        let extent = vk::Extent2D {
+            width: 9,
+            height: 17,
+        };
+        assert_eq!(dispatch_groups(extent, [2, 3, 1]).unwrap(), [2, 3]);
+        assert!(dispatch_groups(extent, [1, 3, 1]).is_err());
+        assert!(dispatch_groups(extent, [2, 2, 1]).is_err());
     }
 }

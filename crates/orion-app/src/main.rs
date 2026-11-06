@@ -1,6 +1,7 @@
 mod app;
 mod checkpoint;
 mod freecam;
+mod output_file;
 mod rates;
 mod simulation;
 mod tick;

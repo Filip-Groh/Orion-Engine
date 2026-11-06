@@ -1,7 +1,12 @@
 use anyhow::{Context, Result};
 use ash::vk;
 
-use crate::{device::ComputeDevice, storage_buffer::StorageBuffer};
+use crate::{
+    SceneFrame,
+    device::ComputeDevice,
+    scene_buffer::pack_scene,
+    storage_buffer::{StorageBuffer, max_storage_bytes},
+};
 
 pub(super) struct Dispatch {
     device: ash::Device,
@@ -78,13 +83,17 @@ impl Dispatch {
         Ok(())
     }
 
-    pub(super) fn bind_buffers(
+    pub(super) fn bind_scene(
         &mut self,
         device: &ComputeDevice,
-        scene: &[u8],
+        frame: SceneFrame<'_>,
+        extent: vk::Extent2D,
+        bgra: bool,
         pixels: &StorageBuffer,
     ) -> Result<()> {
-        let input = [self.upload(device, scene)?];
+        let max_bytes = max_storage_bytes(device.limits.max_storage_buffer_range);
+        let scene = pack_scene(frame, extent, bgra, max_bytes)?;
+        let input = [self.upload(device, &scene)?];
         let output = [pixels.descriptor(pixels.size)];
         let writes = [(0, &input), (1, &output)].map(|(binding, info)| {
             vk::WriteDescriptorSet::default()
@@ -108,6 +117,12 @@ impl Dispatch {
         let input = self.input.as_mut().expect("scene buffer was allocated");
         input.upload(bytes);
         Ok(input.descriptor(bytes.len()))
+    }
+
+    pub(super) fn begin_recording(&self) -> ash::prelude::VkResult<()> {
+        let begin = vk::CommandBufferBeginInfo::default()
+            .flags(vk::CommandBufferUsageFlags::ONE_TIME_SUBMIT);
+        unsafe { self.device.begin_command_buffer(self.command, &begin) }
     }
 
     pub(super) fn submit(&mut self, queue: vk::Queue, ready: Option<vk::Semaphore>) -> Result<()> {

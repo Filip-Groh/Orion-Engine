@@ -41,8 +41,8 @@ impl Swapchain {
         };
         let extent = config.extent;
         let format = config.format.format;
-        let pixels =
-            StorageBuffer::device_local_pixels(device, pixel_buffer_size(device, extent)?)?;
+        let size = pixel_buffer_size(extent, device.limits.max_storage_buffer_range)?;
+        let pixels = StorageBuffer::device_local_pixels(device, size)?;
 
         let families = [device.compute_family, device.present_family];
         let info = config.create_info(surface.handle, old, &families);

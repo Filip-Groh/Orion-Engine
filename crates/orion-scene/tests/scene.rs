@@ -1,6 +1,6 @@
 use std::path::Path;
 
-use orion_scene::{Camera, Mesh, Scene};
+use orion_scene::{Camera, Mesh, Scene, SceneSnapshot, SineBob, Sphere};
 
 fn camera() -> Camera {
     Camera {
@@ -52,4 +52,45 @@ fn demo_keeps_the_triangle_and_suzanne_in_separate_meshes() {
         .collect();
     triangle_counts.sort_unstable();
     assert_eq!(triangle_counts, [1, 968]);
+}
+
+#[test]
+fn scene_snapshot_restores_the_selected_camera_and_its_other_components() {
+    let mut scene = Scene::new(camera());
+    let selected = Camera {
+        eye: [0.0, 3.0, 2.0],
+        ..camera()
+    };
+    let sphere = Sphere {
+        center: [1.0, 2.0, 3.0],
+        radius: 1.0,
+        albedo: [0.2; 3],
+    };
+    let bob = SineBob {
+        rest_y: 2.0,
+        amplitude: 0.5,
+    };
+    scene.active_camera = scene.world.spawn((selected, sphere, bob));
+
+    let mut restored = SceneSnapshot::capture(&scene).unwrap().restore().unwrap();
+    assert_eq!(restored.world.len(), 2);
+    assert_eq!(restored.camera().unwrap().eye, selected.eye);
+    let (restored_sphere, restored_bob) = restored
+        .world
+        .query_one_mut::<(&Sphere, &SineBob)>(restored.active_camera)
+        .unwrap();
+    assert_eq!(restored_sphere.center, sphere.center);
+    assert_eq!(restored_bob.amplitude, bob.amplitude);
+}
+
+#[test]
+fn scene_snapshot_rejects_unsupported_components() {
+    struct Unsupported;
+    let mut scene = Scene::new(camera());
+    let entity = scene.world.spawn((Unsupported,));
+    let error = SceneSnapshot::capture(&scene).err().unwrap();
+    assert_eq!(
+        error.to_string(),
+        format!("entity {entity:?} has a component that checkpoints do not support")
+    );
 }

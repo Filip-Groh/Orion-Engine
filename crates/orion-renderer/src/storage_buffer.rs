@@ -106,9 +106,13 @@ impl StorageBuffer {
     }
 }
 
-pub(crate) fn pixel_buffer_size(device: &ComputeDevice, extent: vk::Extent2D) -> Result<usize> {
+pub(super) fn max_storage_bytes(storage_limit: u32) -> usize {
+    (storage_limit as usize).min(isize::MAX as usize)
+}
+
+pub(super) fn pixel_buffer_size(extent: vk::Extent2D, storage_limit: u32) -> Result<usize> {
     let count = u64::from(extent.width) * u64::from(extent.height);
-    let max_bytes = u64::from(device.limits.max_storage_buffer_range).min(isize::MAX as u64);
+    let max_bytes = max_storage_bytes(storage_limit) as u64;
     ensure!(
         count > 0 && count <= max_bytes / 4,
         "render extent exceeds the device's pixel buffer limits"
@@ -125,5 +129,34 @@ impl Drop for StorageBuffer {
             self.device.destroy_buffer(self.handle, None);
             self.device.free_memory(self.memory, None);
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn pixel_size_accepts_exact_capacity_and_rejects_one_byte_less() {
+        let extent = vk::Extent2D {
+            width: 3,
+            height: 5,
+        };
+        assert_eq!(pixel_buffer_size(extent, 60).unwrap(), 60);
+        assert!(pixel_buffer_size(extent, 59).is_err());
+    }
+
+    #[test]
+    fn pixel_size_rejects_empty_and_oversized_extents() {
+        let empty = vk::Extent2D {
+            width: 0,
+            height: 5,
+        };
+        assert!(pixel_buffer_size(empty, 60).is_err());
+        let oversized = vk::Extent2D {
+            width: u32::MAX,
+            height: u32::MAX,
+        };
+        assert!(pixel_buffer_size(oversized, u32::MAX).is_err());
     }
 }

@@ -144,6 +144,32 @@ fn catch_up_keeps_the_penultimate_sphere_state_and_resume_preserves_phase() {
     );
 }
 
+#[test]
+fn replacing_the_simulation_starts_a_new_clock_and_discards_old_transforms() {
+    let start = Instant::now();
+    let mut app = App::new(Simulation::new(Scene::demo()).unwrap());
+    app.start_simulation(start);
+    app.advance_simulation(start + Duration::from_millis(100))
+        .unwrap();
+    let (animated, _) = animated_sphere(&app.simulation.scene);
+    assert!(app.previous.sphere_center(animated).is_some());
+
+    let mut loaded = Simulation::new(Scene::demo()).unwrap();
+    loaded
+        .advance_to(30, &mut TransformSnapshot::default())
+        .unwrap();
+    let resumed = start + Duration::from_secs(1);
+    app.replace_simulation(loaded, resumed);
+    assert_eq!(app.previous.sphere_center(animated), None);
+
+    app.advance_simulation(resumed + Duration::from_millis(16))
+        .unwrap();
+    assert_eq!(app.simulation.tick, 30);
+    app.advance_simulation(resumed + Duration::from_millis(17))
+        .unwrap();
+    assert_eq!(app.simulation.tick, 31);
+}
+
 fn animated_sphere(scene: &Scene) -> (Entity, SineBob) {
     let mut query = scene.world.query::<(Entity, &SineBob)>();
     let mut animated = query.iter();

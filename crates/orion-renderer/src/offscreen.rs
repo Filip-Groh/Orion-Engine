@@ -5,9 +5,7 @@ use crate::{
     SceneFrame,
     device::ComputeDevice,
     dispatch::Dispatch,
-    frame::dispatch_groups,
-    pipeline::Pipeline,
-    scene_buffer::pack_scene,
+    pipeline::{Pipeline, dispatch_groups},
     storage_buffer::{StorageBuffer, pixel_buffer_size},
 };
 
@@ -26,7 +24,8 @@ impl OffscreenRenderer {
         let extent = vk::Extent2D { width, height };
         let device = ComputeDevice::headless()?;
         let groups = dispatch_groups(extent, device.limits.max_compute_work_group_count)?;
-        let pixels = StorageBuffer::mapped(&device, pixel_buffer_size(&device, extent)?)?;
+        let size = pixel_buffer_size(extent, device.limits.max_storage_buffer_range)?;
+        let pixels = StorageBuffer::mapped(&device, size)?;
         let pipeline = Pipeline::new(&device.handle)?;
         let dispatch = Dispatch::new(&device, pipeline.descriptor_layout)?;
         Ok(Self {
@@ -41,16 +40,20 @@ impl OffscreenRenderer {
 
     /// Returns tightly packed, top-to-bottom RGBA8 pixels. Drop the renderer on Vulkan failure.
     pub fn render(&mut self, frame: SceneFrame<'_>) -> Result<&[u8]> {
-        let max_bytes =
-            (self.device.limits.max_storage_buffer_range as usize).min(isize::MAX as usize);
-        let scene = pack_scene(frame, self.extent, false, max_bytes)?;
         self.dispatch
-            .bind_buffers(&self.device, &scene, &self.pixels)?;
+            .bind_scene(&self.device, frame, self.extent, false, &self.pixels)?;
+        self.record()?;
+        self.dispatch.submit(self.device.compute_queue, None)?;
+        self.dispatch.wait()?;
+        // The host-coherent buffer is fully written and the submission fence has signaled.
+        Ok(unsafe { self.pixels.read_mapped() })
+    }
+
+    fn record(&self) -> Result<()> {
         let device = &self.device.handle;
         let command = self.dispatch.command;
-        let begin = vk::CommandBufferBeginInfo::default()
-            .flags(vk::CommandBufferUsageFlags::ONE_TIME_SUBMIT);
-        unsafe { device.begin_command_buffer(command, &begin) }
+        self.dispatch
+            .begin_recording()
             .context("begin recording the offscreen dispatch")?;
         self.pipeline
             .record(command, self.dispatch.set, self.groups);
@@ -69,11 +72,7 @@ impl OffscreenRenderer {
             );
             device.end_command_buffer(command)
         }
-        .context("record the offscreen dispatch")?;
-        self.dispatch.submit(self.device.compute_queue, None)?;
-        self.dispatch.wait()?;
-        // The host-coherent buffer is fully written and the submission fence has signaled.
-        Ok(unsafe { self.pixels.read_mapped() })
+        .context("record the offscreen dispatch")
     }
 }
 

@@ -1,13 +1,10 @@
 mod commands;
 
 use crate::{
-    Renderer, SceneFrame, overlay::Overlay, scene_buffer::pack_scene, swapchain::Swapchain,
+    Renderer, SceneFrame, overlay::Overlay, pipeline::dispatch_groups, swapchain::Swapchain,
 };
-use anyhow::{Context, Result, ensure};
+use anyhow::{Context, Result};
 use ash::vk;
-
-// Matches @workgroup_size in raymarch.wgsl.
-const WORKGROUP_SIZE: u32 = 8;
 
 pub(super) enum FrameOutcome {
     Skipped,
@@ -31,13 +28,15 @@ impl<W> Renderer<W> {
         let Some(swapchain) = &self.swapchain else {
             return Ok(FrameOutcome::Skipped);
         };
-        let limits = &self.device.limits;
         let extent = swapchain.extent;
-        let groups = dispatch_groups(extent, limits.max_compute_work_group_count)?;
-        let max_bytes = (limits.max_storage_buffer_range as usize).min(isize::MAX as usize);
-        let scene_bytes = pack_scene(frame, extent, swapchain.bgra, max_bytes)?;
-        self.dispatch
-            .bind_buffers(&self.device, &scene_bytes, &swapchain.pixels)?;
+        let groups = dispatch_groups(extent, self.device.limits.max_compute_work_group_count)?;
+        self.dispatch.bind_scene(
+            &self.device,
+            frame,
+            extent,
+            swapchain.bgra,
+            &swapchain.pixels,
+        )?;
 
         let (index, suboptimal) = match swapchain.acquire(self.dispatch.acquired) {
             Ok(image) => image,
@@ -115,33 +114,5 @@ impl<W> Renderer<W> {
         }
         self.swapchain_dirty = false;
         Ok(())
-    }
-}
-
-pub(super) fn dispatch_groups(extent: vk::Extent2D, limits: [u32; 3]) -> Result<[u32; 2]> {
-    let groups = [
-        extent.width.div_ceil(WORKGROUP_SIZE),
-        extent.height.div_ceil(WORKGROUP_SIZE),
-    ];
-    ensure!(
-        groups[0] <= limits[0] && groups[1] <= limits[1],
-        "render extent exceeds the device's compute dispatch limits"
-    );
-    Ok(groups)
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn dispatch_rounds_up_and_checks_both_axis_limits() {
-        let extent = vk::Extent2D {
-            width: 9,
-            height: 17,
-        };
-        assert_eq!(dispatch_groups(extent, [2, 3, 1]).unwrap(), [2, 3]);
-        assert!(dispatch_groups(extent, [1, 3, 1]).is_err());
-        assert!(dispatch_groups(extent, [2, 2, 1]).is_err());
     }
 }

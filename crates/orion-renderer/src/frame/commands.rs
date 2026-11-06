@@ -14,9 +14,8 @@ impl<W> Renderer<W> {
         let image = swapchain.images[index].handle;
         let device = &self.device.handle;
         let command = self.dispatch.command;
-        let begin = vk::CommandBufferBeginInfo::default()
-            .flags(vk::CommandBufferUsageFlags::ONE_TIME_SUBMIT);
-        unsafe { device.begin_command_buffer(command, &begin) }
+        self.dispatch
+            .begin_recording()
             .context("begin recording the ray march dispatch")?;
 
         self.pipeline.record(command, self.dispatch.set, groups);

@@ -1,20 +1,17 @@
-use std::{path::Path, time::Instant};
+use std::time::Instant;
 
 use anyhow::Context;
 use orion_renderer::Renderer;
 use winit::{
     application::ApplicationHandler,
     dpi::LogicalSize,
-    event::{DeviceEvent, DeviceId, ElementState, KeyEvent, MouseButton, StartCause, WindowEvent},
+    event::{DeviceEvent, DeviceId, ElementState, MouseButton, StartCause, WindowEvent},
     event_loop::{ActiveEventLoop, ControlFlow},
-    keyboard::{KeyCode, PhysicalKey},
-    window::{CursorGrabMode, Window, WindowId},
+    window::{Window, WindowId},
 };
 
 use super::App;
-use crate::{checkpoint, freecam::FreecamInput, rates::RateCounter};
-
-const QUICK_CHECKPOINT: &str = "orion-quicksave.json";
+use crate::{freecam::FreecamInput, rates::RateCounter};
 
 impl ApplicationHandler for App {
     fn new_events(&mut self, event_loop: &ActiveEventLoop, _: StartCause) {
@@ -144,88 +141,6 @@ impl App {
         {
             self.error = Some(error);
             event_loop.exit();
-        }
-    }
-
-    fn capture_cursor(&mut self) {
-        let Some(renderer) = &self.renderer else {
-            return;
-        };
-        if self.cursor_captured {
-            return;
-        }
-        let window = renderer.window();
-        match window
-            .set_cursor_grab(CursorGrabMode::Locked)
-            .or_else(|_| window.set_cursor_grab(CursorGrabMode::Confined))
-        {
-            Ok(()) => {
-                self.cursor_captured = true;
-                window.set_cursor_visible(false);
-            }
-            Err(error) => eprintln!("Could not capture the cursor: {error}"),
-        }
-    }
-
-    pub(super) fn release_cursor(&mut self) {
-        if !self.cursor_captured {
-            return;
-        }
-        let now = Instant::now();
-        if let Some(renderer) = &self.renderer {
-            let window = renderer.window();
-            let _ = window.set_cursor_grab(CursorGrabMode::None);
-            window.set_cursor_visible(true);
-        }
-        self.cursor_captured = false;
-        self.queue_input(now, FreecamInput::ReleaseAll);
-    }
-
-    fn handle_key(&mut self, event: KeyEvent) {
-        use KeyCode::*;
-        let PhysicalKey::Code(key) = event.physical_key else {
-            return;
-        };
-        if event.repeat {
-            return;
-        }
-        let pressed = event.state.is_pressed();
-        match key {
-            F5 if pressed => {
-                match checkpoint::save(&self.simulation, Path::new(QUICK_CHECKPOINT)) {
-                    Ok(()) => {
-                        eprintln!("Saved tick {} to {QUICK_CHECKPOINT}", self.simulation.tick)
-                    }
-                    Err(error) => eprintln!("Could not save {QUICK_CHECKPOINT}: {error:#}"),
-                }
-            }
-            F9 if pressed => match checkpoint::load(Path::new(QUICK_CHECKPOINT)) {
-                Ok(simulation) => {
-                    eprintln!("Loaded tick {} from {QUICK_CHECKPOINT}", simulation.tick);
-                    self.simulation = simulation;
-                    self.previous = Default::default();
-                    self.tps = RateCounter::default();
-                    self.start_simulation(Instant::now());
-                    if let Some(renderer) = &self.renderer {
-                        renderer.window().request_redraw();
-                    }
-                }
-                Err(error) => eprintln!("Could not load {QUICK_CHECKPOINT}: {error:#}"),
-            },
-            Escape if pressed => {
-                if self.cursor_captured {
-                    self.release_cursor();
-                } else {
-                    self.queue_input(Instant::now(), FreecamInput::ReleaseAll);
-                }
-            }
-            KeyW | KeyA | KeyS | KeyD | Space | ControlLeft | ControlRight | ShiftLeft
-            | ShiftRight
-                if self.cursor_captured =>
-            {
-                self.queue_input(Instant::now(), FreecamInput::Key { key, pressed });
-            }
-            _ => {}
         }
     }
 }
