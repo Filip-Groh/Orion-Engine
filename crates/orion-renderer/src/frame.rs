@@ -65,7 +65,8 @@ impl<W> Renderer<W> {
             })
             .transpose()?;
         self.record(index as usize, groups, overlay_frame)?;
-        self.dispatch.submit(self.device.compute_queue, ready)?;
+        self.dispatch
+            .submit(self.device.compute_queue, Some(ready))?;
         before_present(&self.window);
         self.present(index, suboptimal)
     }
@@ -117,7 +118,7 @@ impl<W> Renderer<W> {
     }
 }
 
-fn dispatch_groups(extent: vk::Extent2D, limits: [u32; 3]) -> Result<[u32; 2]> {
+pub(super) fn dispatch_groups(extent: vk::Extent2D, limits: [u32; 3]) -> Result<[u32; 2]> {
     let groups = [
         extent.width.div_ceil(WORKGROUP_SIZE),
         extent.height.div_ceil(WORKGROUP_SIZE),

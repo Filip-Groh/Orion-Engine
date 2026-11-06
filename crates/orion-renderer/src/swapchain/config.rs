@@ -19,7 +19,7 @@ impl SwapchainConfig {
         requested_extent: vk::Extent2D,
         overlay: bool,
     ) -> Result<Option<Self>> {
-        let surface = &device.surface;
+        let surface = device.window_surface();
         let physical = device.physical;
         let capabilities = unsafe {
             surface

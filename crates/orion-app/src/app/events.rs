@@ -1,4 +1,4 @@
-use std::time::Instant;
+use std::{path::Path, time::Instant};
 
 use anyhow::Context;
 use orion_renderer::Renderer;
@@ -12,7 +12,9 @@ use winit::{
 };
 
 use super::App;
-use crate::{freecam::FreecamInput, rates::RateCounter};
+use crate::{checkpoint, freecam::FreecamInput, rates::RateCounter};
+
+const QUICK_CHECKPOINT: &str = "orion-quicksave.json";
 
 impl ApplicationHandler for App {
     fn new_events(&mut self, event_loop: &ActiveEventLoop, _: StartCause) {
@@ -49,6 +51,8 @@ impl ApplicationHandler for App {
     fn device_event(&mut self, _: &ActiveEventLoop, _: DeviceId, event: DeviceEvent) {
         if self.cursor_captured
             && let DeviceEvent::MouseMotion { delta: (dx, dy) } = event
+            && (dx as f32).is_finite()
+            && (dy as f32).is_finite()
         {
             self.queue_input(
                 Instant::now(),
@@ -117,9 +121,11 @@ impl ApplicationHandler for App {
 
     fn about_to_wait(&mut self, event_loop: &ActiveEventLoop) {
         self.run_due_ticks(event_loop);
-        event_loop.set_control_flow(self.clock.as_ref().map_or(ControlFlow::Wait, |clock| {
-            ControlFlow::WaitUntil(clock.next_deadline())
-        }));
+        let deadline = self
+            .clock
+            .as_ref()
+            .and_then(|clock| clock.next_deadline(self.simulation.tick));
+        event_loop.set_control_flow(deadline.map_or(ControlFlow::Wait, ControlFlow::WaitUntil));
     }
 
     fn suspended(&mut self, _event_loop: &ActiveEventLoop) {
@@ -180,17 +186,46 @@ impl App {
         let PhysicalKey::Code(key) = event.physical_key else {
             return;
         };
-        if event.repeat || !self.cursor_captured {
+        if event.repeat {
             return;
         }
         let pressed = event.state.is_pressed();
-        if key == Escape && pressed {
-            self.release_cursor();
-        } else if matches!(
-            key,
-            KeyW | KeyA | KeyS | KeyD | Space | ControlLeft | ControlRight | ShiftLeft | ShiftRight
-        ) {
-            self.queue_input(Instant::now(), FreecamInput::Key { key, pressed });
+        match key {
+            F5 if pressed => {
+                match checkpoint::save(&self.simulation, Path::new(QUICK_CHECKPOINT)) {
+                    Ok(()) => {
+                        eprintln!("Saved tick {} to {QUICK_CHECKPOINT}", self.simulation.tick)
+                    }
+                    Err(error) => eprintln!("Could not save {QUICK_CHECKPOINT}: {error:#}"),
+                }
+            }
+            F9 if pressed => match checkpoint::load(Path::new(QUICK_CHECKPOINT)) {
+                Ok(simulation) => {
+                    eprintln!("Loaded tick {} from {QUICK_CHECKPOINT}", simulation.tick);
+                    self.simulation = simulation;
+                    self.previous = Default::default();
+                    self.tps = RateCounter::default();
+                    self.start_simulation(Instant::now());
+                    if let Some(renderer) = &self.renderer {
+                        renderer.window().request_redraw();
+                    }
+                }
+                Err(error) => eprintln!("Could not load {QUICK_CHECKPOINT}: {error:#}"),
+            },
+            Escape if pressed => {
+                if self.cursor_captured {
+                    self.release_cursor();
+                } else {
+                    self.queue_input(Instant::now(), FreecamInput::ReleaseAll);
+                }
+            }
+            KeyW | KeyA | KeyS | KeyD | Space | ControlLeft | ControlRight | ShiftLeft
+            | ShiftRight
+                if self.cursor_captured =>
+            {
+                self.queue_input(Instant::now(), FreecamInput::Key { key, pressed });
+            }
+            _ => {}
         }
     }
 }

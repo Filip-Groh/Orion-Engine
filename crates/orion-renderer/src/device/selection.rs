@@ -18,33 +18,33 @@ pub(super) struct DeviceCandidate {
 
 impl DeviceCandidate {
     pub(super) fn inspect(
-        surface: &Surface,
+        instance: &ash::Instance,
+        surface: Option<&Surface>,
         physical: vk::PhysicalDevice,
         overlay: bool,
     ) -> Result<Option<Self>> {
-        let properties = unsafe { surface.instance.get_physical_device_properties(physical) };
+        let properties = unsafe { instance.get_physical_device_properties(physical) };
         if properties.api_version < vk::API_VERSION_1_1 {
             return Ok(None);
         }
-        let available = unsafe {
-            surface
-                .instance
-                .enumerate_device_extension_properties(physical)
-        }
-        .context("enumerate Vulkan device extensions")?;
+        let available = unsafe { instance.enumerate_device_extension_properties(physical) }
+            .context("enumerate Vulkan device extensions")?;
         let supports = |name: &CStr| {
             available
                 .iter()
                 .any(|extension| extension.extension_name_as_c_str() == Ok(name))
         };
-        if !supports(khr::swapchain::NAME) {
+        if surface.is_some() && !supports(khr::swapchain::NAME) {
             return Ok(None);
         }
-        let Some((compute_family, present_family)) = queue_families(surface, physical, overlay)?
+        let Some((compute_family, present_family)) =
+            queue_families(instance, surface, physical, overlay)?
         else {
             return Ok(None);
         };
-        if !supports_swapchain(surface, physical, overlay)? {
+        if let Some(surface) = surface
+            && !supports_swapchain(surface, physical, overlay)?
+        {
             return Ok(None);
         }
         Ok(Some(Self {
@@ -80,15 +80,12 @@ fn supports_swapchain(
 }
 
 fn queue_families(
-    surface: &Surface,
+    instance: &ash::Instance,
+    surface: Option<&Surface>,
     physical: vk::PhysicalDevice,
     overlay: bool,
 ) -> Result<Option<(u32, u32)>> {
-    let families = unsafe {
-        surface
-            .instance
-            .get_physical_device_queue_family_properties(physical)
-    };
+    let families = unsafe { instance.get_physical_device_queue_family_properties(physical) };
     let mut required = vk::QueueFlags::COMPUTE;
     if overlay {
         required |= vk::QueueFlags::GRAPHICS;
@@ -102,12 +99,15 @@ fn queue_families(
     {
         let index = index as u32;
         let can_render = family.queue_flags.contains(required);
-        let can_present = unsafe {
-            surface
-                .loader
-                .get_physical_device_surface_support(physical, index, surface.handle)
-        }
-        .context("query Vulkan queue presentation support")?;
+        let can_present = match surface {
+            Some(surface) => unsafe {
+                surface
+                    .loader
+                    .get_physical_device_surface_support(physical, index, surface.handle)
+            }
+            .context("query Vulkan queue presentation support")?,
+            None => true,
+        };
         if can_render && can_present {
             return Ok(Some((index, index)));
         }

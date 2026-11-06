@@ -1,6 +1,6 @@
-use std::{ffi::c_void, ptr};
+use std::{ffi::c_void, ptr, slice};
 
-use anyhow::{Context, Result};
+use anyhow::{Context, Result, ensure};
 use ash::vk;
 
 use crate::device::ComputeDevice;
@@ -14,18 +14,30 @@ pub(crate) struct StorageBuffer {
 }
 
 impl StorageBuffer {
-    pub fn new(device: &ComputeDevice, size: usize, upload: bool) -> Result<Self> {
-        let (usage, flags) = if upload {
-            (
-                vk::BufferUsageFlags::STORAGE_BUFFER,
-                vk::MemoryPropertyFlags::HOST_VISIBLE | vk::MemoryPropertyFlags::HOST_COHERENT,
-            )
-        } else {
-            (
-                vk::BufferUsageFlags::STORAGE_BUFFER | vk::BufferUsageFlags::TRANSFER_SRC,
-                vk::MemoryPropertyFlags::DEVICE_LOCAL,
-            )
-        };
+    pub fn mapped(device: &ComputeDevice, size: usize) -> Result<Self> {
+        Self::new(
+            device,
+            size,
+            vk::BufferUsageFlags::STORAGE_BUFFER,
+            vk::MemoryPropertyFlags::HOST_VISIBLE | vk::MemoryPropertyFlags::HOST_COHERENT,
+        )
+    }
+
+    pub fn device_local_pixels(device: &ComputeDevice, size: usize) -> Result<Self> {
+        Self::new(
+            device,
+            size,
+            vk::BufferUsageFlags::STORAGE_BUFFER | vk::BufferUsageFlags::TRANSFER_SRC,
+            vk::MemoryPropertyFlags::DEVICE_LOCAL,
+        )
+    }
+
+    fn new(
+        device: &ComputeDevice,
+        size: usize,
+        usage: vk::BufferUsageFlags,
+        flags: vk::MemoryPropertyFlags,
+    ) -> Result<Self> {
         let info = vk::BufferCreateInfo::default()
             .size(size as u64)
             .usage(usage);
@@ -38,7 +50,7 @@ impl StorageBuffer {
             size,
         };
         buffer.allocate_memory(&device.memory, flags)?;
-        if upload {
+        if flags.contains(vk::MemoryPropertyFlags::HOST_VISIBLE) {
             buffer.mapped = unsafe {
                 buffer.device.map_memory(
                     buffer.memory,
@@ -47,7 +59,7 @@ impl StorageBuffer {
                     vk::MemoryMapFlags::empty(),
                 )
             }
-            .context("map scene upload memory")?;
+            .context("map storage buffer memory")?;
         }
         Ok(buffer)
     }
@@ -86,6 +98,22 @@ impl StorageBuffer {
         // The frame fence has completed before updating mapped scene memory.
         unsafe { ptr::copy_nonoverlapping(bytes.as_ptr(), self.mapped.cast(), bytes.len()) };
     }
+
+    /// The caller must make the entire buffer visible to the host and wait for GPU writes.
+    pub unsafe fn read_mapped(&self) -> &[u8] {
+        assert!(!self.mapped.is_null());
+        unsafe { slice::from_raw_parts(self.mapped.cast(), self.size) }
+    }
+}
+
+pub(crate) fn pixel_buffer_size(device: &ComputeDevice, extent: vk::Extent2D) -> Result<usize> {
+    let count = u64::from(extent.width) * u64::from(extent.height);
+    let max_bytes = u64::from(device.limits.max_storage_buffer_range).min(isize::MAX as u64);
+    ensure!(
+        count > 0 && count <= max_bytes / 4,
+        "render extent exceeds the device's pixel buffer limits"
+    );
+    Ok(count as usize * 4)
 }
 
 impl Drop for StorageBuffer {

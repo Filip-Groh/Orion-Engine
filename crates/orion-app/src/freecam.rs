@@ -1,6 +1,7 @@
 use std::{collections::BTreeSet, f32::consts::TAU};
 
 use orion_scene::Camera;
+use serde::{Deserialize, Serialize};
 use winit::keyboard::KeyCode;
 
 use crate::tick::TICK_SECONDS;
@@ -10,12 +11,14 @@ const PITCH_LIMIT: f32 = 89.0_f32.to_radians();
 const MOVE_SPEED: f32 = 3.0;
 const BOOST_MULTIPLIER: f32 = 3.0;
 
+#[derive(Clone, Serialize, Deserialize)]
 pub(crate) enum FreecamInput {
     Key { key: KeyCode, pressed: bool },
     Look { dx: f32, dy: f32 },
     ReleaseAll,
 }
 
+#[derive(Clone, Serialize, Deserialize)]
 pub(crate) struct Freecam {
     keys: BTreeSet<KeyCode>,
     yaw: f32,

@@ -26,7 +26,7 @@ impl Overlay {
             ..Options::default()
         };
         let renderer = Renderer::with_default_allocator(
-            &device.surface.instance,
+            &device.instance.handle,
             device.physical,
             device.handle.clone(),
             RenderMode::RenderPass(target.render_pass),

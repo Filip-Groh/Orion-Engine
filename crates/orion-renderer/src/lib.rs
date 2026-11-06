@@ -1,9 +1,10 @@
-//! Windowed Vulkan compute renderer for signed distance fields and triangles.
+//! Vulkan compute renderer for signed distance fields and triangles.
 
 mod bvh;
 mod device;
 mod dispatch;
 mod frame;
+mod offscreen;
 mod overlay;
 mod overlay_target;
 mod pipeline;
@@ -20,6 +21,7 @@ use raw_window_handle::{HasDisplayHandle, HasWindowHandle};
 use device::ComputeDevice;
 use dispatch::Dispatch;
 use frame::FrameOutcome;
+pub use offscreen::OffscreenRenderer;
 use overlay::Overlay;
 use pipeline::Pipeline;
 pub use scene_frame::{SceneFrame, TransformSnapshot};

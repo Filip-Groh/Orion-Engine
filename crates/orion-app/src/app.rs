@@ -1,28 +1,23 @@
 mod events;
 
-use std::{collections::VecDeque, f64::consts::TAU, time::Instant};
+use std::time::Instant;
 
 use anyhow::{Context, Result};
 use orion_renderer::{Renderer, SceneFrame, TransformSnapshot};
-use orion_scene::{Scene, SineBob, Sphere};
 use winit::{event_loop::EventLoop, window::Window};
 
 use crate::{
-    freecam::{Freecam, FreecamInput},
+    freecam::FreecamInput,
     rates::{self, RateCounter},
-    tick::{TICKS_PER_SECOND, TickClock},
+    simulation::Simulation,
+    tick::TickClock,
 };
-
-const BOB_PERIOD_TICKS: u64 = 2 * TICKS_PER_SECOND;
 
 pub(crate) struct App {
     renderer: Option<Renderer<Window>>,
-    scene: Scene,
-    freecam: Freecam,
+    simulation: Simulation,
     clock: Option<TickClock>,
     previous: TransformSnapshot,
-    bob_phase: u64,
-    input: VecDeque<(u64, FreecamInput)>,
     cursor_captured: bool,
     fps: RateCounter,
     tps: RateCounter,
@@ -34,21 +29,18 @@ pub(crate) struct App {
 mod tests;
 
 impl App {
-    pub(crate) fn new(scene: Scene) -> Result<Self> {
-        Ok(Self {
+    pub(crate) fn new(simulation: Simulation) -> Self {
+        Self {
             renderer: None,
-            freecam: Freecam::new(&scene.camera()?),
             clock: None,
             previous: TransformSnapshot::default(),
-            bob_phase: 0,
-            input: VecDeque::new(),
             cursor_captured: false,
             fps: RateCounter::default(),
             tps: RateCounter::default(),
             occluded: false,
-            scene,
+            simulation,
             error: None,
-        })
+        }
     }
 
     pub(crate) fn run(mut self) -> Result<()> {
@@ -60,50 +52,31 @@ impl App {
     }
 
     fn start_simulation(&mut self, now: Instant) {
-        self.clock = Some(TickClock::new(now));
+        self.clock = Some(TickClock::new(now, self.simulation.tick));
         self.tps.record(now, 0);
     }
 
     fn queue_input(&mut self, now: Instant, input: FreecamInput) {
-        if let Some(clock) = &self.clock {
-            self.input.push_back((clock.input_tick(now), input));
+        if let Some(clock) = &self.clock
+            && let Some(tick) = clock.due_tick(now).checked_add(1)
+        {
+            let queue = &mut self.simulation.input;
+            // A checkpoint can already contain inputs scheduled beyond this boundary.
+            let index = queue.partition_point(|(queued_tick, _)| *queued_tick <= tick);
+            queue.insert(index, (tick, input));
         }
     }
 
     fn advance_simulation(&mut self, now: Instant) -> Result<()> {
-        let Some(clock) = &mut self.clock else {
+        let Some(clock) = &self.clock else {
             return Ok(());
         };
-        let ticks = clock.take_due_ticks(now);
-        if ticks.is_empty() {
-            return Ok(());
+        let target = clock.due_tick(now);
+        if target > self.simulation.tick {
+            let count = target - self.simulation.tick;
+            self.simulation.advance_to(target, &mut self.previous)?;
+            self.tps.record(now, count);
         }
-
-        let count = ticks.end - ticks.start;
-        let last_tick = ticks.end - 1;
-        for tick in ticks {
-            // Only the state immediately before the last tick can be rendered after catch-up.
-            if tick == last_tick {
-                self.previous.capture(&self.scene)?;
-            }
-            let camera = self.scene.camera_mut()?;
-            let inputs = std::iter::from_fn(|| {
-                let (input_tick, _) = self.input.front()?;
-                if *input_tick == tick {
-                    self.input.pop_front().map(|(_, input)| input)
-                } else {
-                    None
-                }
-            });
-            self.freecam.step(camera, inputs);
-            self.bob_phase = (self.bob_phase + 1) % BOB_PERIOD_TICKS;
-            let angle = TAU * self.bob_phase as f64 / BOB_PERIOD_TICKS as f64;
-            let wave = libm::sin(angle) as f32;
-            for (sphere, bob) in self.scene.world.query_mut::<(&mut Sphere, &SineBob)>() {
-                sphere.center[1] = bob.rest_y + bob.amplitude * wave;
-            }
-        }
-        self.tps.record(now, count);
         Ok(())
     }
 
@@ -123,11 +96,10 @@ impl App {
         }
         let scale = window.scale_factor() as f32;
         let now = Instant::now();
-        let fraction = self
-            .clock
-            .as_ref()
-            .map_or(1.0, |clock| clock.interpolation_fraction(now));
-        let frame = SceneFrame::interpolated(&self.scene, &self.previous, fraction);
+        let fraction = self.clock.as_ref().map_or(1.0, |clock| {
+            clock.interpolation_fraction(now, self.simulation.tick)
+        });
+        let frame = SceneFrame::interpolated(&self.simulation.scene, &self.previous, fraction);
         let presented = renderer
             .render_frame_with_overlay(
                 frame,
@@ -149,8 +121,8 @@ impl App {
         self.renderer = None;
         self.clock = None;
         self.previous = TransformSnapshot::default();
-        self.input.clear();
-        self.freecam.clear_keys();
+        self.simulation.input.clear();
+        self.simulation.freecam.clear_keys();
         self.fps = RateCounter::default();
         self.tps = RateCounter::default();
         self.occluded = false;

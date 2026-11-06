@@ -24,13 +24,37 @@ Click inside the window to capture the mouse for freecam. Move the mouse to look
 
 The simulation advances at a fixed 60 TPS. Freecam key changes and mouse deltas are queued for the next tick when the event loop receives them. The gold sphere bobs vertically on a two-second sine wave driven by simulation ticks. Rendering blends the camera and sphere positions between the two latest completed states, one tick behind real time. Given the same starting state and ordered inputs per tick, the simulation produces the same state regardless of redraw timing.
 
+## Save and resume
+
+Press **F5** to save the latest completed tick to `orion-quicksave.json` in the working directory. Press **F9** to reload it. Both shortcuts work with the cursor captured or released and report the tick in the terminal. Copy the file before the next quicksave to keep multiple checkpoints. Use `--load` to open any checkpoint when launching the demo.
+
+```sh
+cargo run -- --load orion-quicksave.json
+```
+
+Checkpoints include the active camera, scene geometry, animation state, held controls, and queued input. Meshes are embedded in the file. Press **Esc** after loading if you want to release saved movement controls. The `snapshot` command runs the demo without input to an exact tick and saves it without opening a window. Add `--obj path/to/mesh.obj` to include a custom mesh.
+
+```sh
+cargo run -- snapshot tick-1000.json --tick 1000
+```
+
+## Render video
+
+Offline export requires a Vulkan 1.1 compute device and an FFmpeg build with `libx264` on `PATH`. It renders the scene without opening a window and writes an H.264 MP4. Output defaults to 960 × 540 and 60 FPS. Set `--width` and `--height` to positive even values to change the resolution.
+
+```sh
+cargo run -- render tick-1000.json output.mp4 --ticks 100 --tps 20 --fps 60
+```
+
+This produces 300 frames over five seconds. The first frame shows tick 1000, and the final frame blends ticks 1099 and 1100. `--tps` sets how many simulation ticks play per video second and defaults to 60. Simulation steps still use the fixed 1/60-second timestep. When the requested duration falls between video frame boundaries, export rounds the frame count up.
+
 ## Workspace
 
 | Crate | Responsibility |
 | --- | --- |
 | [`orion-scene`](crates/orion-scene) | [hecs](https://github.com/Ralith/hecs) world, scene components, OBJ import, and demo setup. |
-| [`orion-renderer`](crates/orion-renderer) | Vulkan device, compute pipeline, scene upload, and swapchain presentation. The compute shader is assembled from the files in [`shaders`](crates/orion-renderer/shaders). |
-| [`orion-app`](crates/orion-app) | Default executable. It owns the winit event loop and drives the demo. |
+| [`orion-renderer`](crates/orion-renderer) | Vulkan device, compute pipeline, scene upload, swapchain presentation, and offscreen rendering. The compute shader is assembled from the files in [`shaders`](crates/orion-renderer/shaders). |
+| [`orion-app`](crates/orion-app) | Default executable. It drives the demo, checkpoints, and video export. |
 
 `Scene::world` stores cameras, spheres, and meshes as components. Set `Scene::active_camera` to select the camera entity. The renderer queries the world each frame, so spawning or despawning a sphere or mesh affects the next frame. `Scene::import_obj` returns the entity for the imported mesh.
 

@@ -2,21 +2,24 @@
 
 mod demo;
 mod obj;
+mod snapshot;
 
 use std::{fs, path::Path};
 
 use anyhow::{Context, Result};
 pub use hecs::{Entity, World};
+use serde::{Deserialize, Serialize};
+pub use snapshot::SceneSnapshot;
 
 /// A perspective camera with +Y as world up.
-#[derive(Clone, Copy, Debug)]
+#[derive(Clone, Copy, Debug, Serialize, Deserialize)]
 pub struct Camera {
     pub eye: [f32; 3],
     pub target: [f32; 3],
     pub vertical_fov_degrees: f32,
 }
 
-#[derive(Clone, Copy, Debug)]
+#[derive(Clone, Copy, Debug, Serialize, Deserialize)]
 pub struct Sphere {
     pub center: [f32; 3],
     pub radius: f32,
@@ -25,13 +28,13 @@ pub struct Sphere {
 }
 
 /// The rest height and vertical amplitude of a sine-wave animation.
-#[derive(Clone, Copy, Debug)]
+#[derive(Clone, Copy, Debug, Serialize, Deserialize)]
 pub struct SineBob {
     pub rest_y: f32,
     pub amplitude: f32,
 }
 
-#[derive(Clone, Copy, Debug)]
+#[derive(Clone, Copy, Debug, Serialize, Deserialize)]
 pub struct Triangle {
     /// World-space vertices in counterclockwise order as seen from the front.
     pub vertices: [[f32; 3]; 3],
@@ -40,7 +43,7 @@ pub struct Triangle {
 }
 
 /// One mesh object, represented by its world-space triangles.
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct Mesh {
     pub triangles: Vec<Triangle>,
 }

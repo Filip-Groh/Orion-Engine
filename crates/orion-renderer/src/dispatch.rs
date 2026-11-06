@@ -31,10 +31,12 @@ impl Dispatch {
         dispatch.allocate_descriptors(layout)?;
         dispatch.allocate_commands(device.compute_family)?;
         unsafe {
-            dispatch.acquired = dispatch
-                .device
-                .create_semaphore(&vk::SemaphoreCreateInfo::default(), None)
-                .context("create the image acquisition semaphore")?;
+            if device.surface.is_some() {
+                dispatch.acquired = dispatch
+                    .device
+                    .create_semaphore(&vk::SemaphoreCreateInfo::default(), None)
+                    .context("create the image acquisition semaphore")?;
+            }
             dispatch.fence = dispatch
                 .device
                 .create_fence(&vk::FenceCreateInfo::default(), None)
@@ -101,23 +103,24 @@ impl Dispatch {
             .as_ref()
             .is_none_or(|buffer| buffer.size < bytes.len())
         {
-            self.input = Some(StorageBuffer::new(device, bytes.len(), true)?);
+            self.input = Some(StorageBuffer::mapped(device, bytes.len())?);
         }
         let input = self.input.as_mut().expect("scene buffer was allocated");
         input.upload(bytes);
         Ok(input.descriptor(bytes.len()))
     }
 
-    pub(super) fn submit(&mut self, queue: vk::Queue, ready: vk::Semaphore) -> Result<()> {
+    pub(super) fn submit(&mut self, queue: vk::Queue, ready: Option<vk::Semaphore>) -> Result<()> {
         let commands = [self.command];
         let waits = [self.acquired];
         let stages = [vk::PipelineStageFlags::TRANSFER];
-        let signals = [ready];
-        let submit = vk::SubmitInfo::default()
-            .wait_semaphores(&waits)
-            .wait_dst_stage_mask(&stages)
-            .command_buffers(&commands)
-            .signal_semaphores(&signals);
+        let mut submit = vk::SubmitInfo::default().command_buffers(&commands);
+        if ready.is_some() {
+            submit = submit
+                .wait_semaphores(&waits)
+                .wait_dst_stage_mask(&stages)
+                .signal_semaphores(ready.as_slice());
+        }
         unsafe {
             self.device
                 .reset_fences(&[self.fence])

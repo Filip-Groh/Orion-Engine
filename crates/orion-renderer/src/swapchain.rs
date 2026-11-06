@@ -1,9 +1,13 @@
 mod config;
 
-use anyhow::{Context, Result, ensure};
+use anyhow::{Context, Result};
 use ash::{khr, vk};
 
-use crate::{device::ComputeDevice, overlay_target::OverlayTarget, storage_buffer::StorageBuffer};
+use crate::{
+    device::ComputeDevice,
+    overlay_target::OverlayTarget,
+    storage_buffer::{StorageBuffer, pixel_buffer_size},
+};
 use config::SwapchainConfig;
 pub(crate) use config::{choose_format, image_usage};
 
@@ -31,22 +35,18 @@ impl Swapchain {
         old: vk::SwapchainKHR,
         overlay: bool,
     ) -> Result<Option<Self>> {
-        let surface = &device.surface;
+        let surface = device.window_surface();
         let Some(config) = SwapchainConfig::query(device, requested_extent, overlay)? else {
             return Ok(None);
         };
         let extent = config.extent;
         let format = config.format.format;
-        let pixel_count = u64::from(extent.width) * u64::from(extent.height);
-        ensure!(
-            pixel_count <= u64::from(device.limits.max_storage_buffer_range / 4),
-            "the swapchain extent exceeds the device's storage buffer limit"
-        );
-        let pixels = StorageBuffer::new(device, pixel_count as usize * 4, false)?;
+        let pixels =
+            StorageBuffer::device_local_pixels(device, pixel_buffer_size(device, extent)?)?;
 
         let families = [device.compute_family, device.present_family];
         let info = config.create_info(surface.handle, old, &families);
-        let loader = khr::swapchain::Device::new(&surface.instance, &device.handle);
+        let loader = khr::swapchain::Device::new(&device.instance.handle, &device.handle);
         let handle = unsafe { loader.create_swapchain(&info, None) }
             .context("create the Vulkan swapchain")?;
         let mut swapchain = Self {

@@ -5,8 +5,12 @@ edition.workspace = true
 
 [dependencies]
 anyhow.workspace = true
+clap = { version = "4", features = ["derive"] }
 egui.workspace = true
 libm.workspace = true
 orion-renderer.workspace = true
 orion-scene.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+tempfile.workspace = true
 winit.workspace = true
