@@ -1,0 +1,10 @@
+[package]
+name = "orion-app"
+version.workspace = true
+edition.workspace = true
+
+[dependencies]
+anyhow.workspace = true
+orion-renderer.workspace = true
+orion-scene.workspace = true
+winit.workspace = true

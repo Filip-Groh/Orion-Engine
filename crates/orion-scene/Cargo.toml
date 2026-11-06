@@ -1,0 +1,4 @@
+[package]
+name = "orion-scene"
+version.workspace = true
+edition.workspace = true

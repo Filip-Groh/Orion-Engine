@@ -1,0 +1,20 @@
+[workspace]
+members = ["crates/orion-app", "crates/orion-renderer", "crates/orion-scene"]
+default-members = ["crates/orion-app"]
+resolver = "3"
+
+[workspace.package]
+version = "0.1.0"
+edition = "2024"
+
+[workspace.dependencies]
+anyhow = "1"
+ash = "0.38"
+ash-window = "0.13"
+bytemuck = { version = "1", features = ["derive"] }
+naga = { version = "30.0.1", features = ["wgsl-in", "spv-out"] }
+raw-window-handle = "0.6"
+winit = "0.30"
+
+orion-renderer = { path = "crates/orion-renderer" }
+orion-scene = { path = "crates/orion-scene" }

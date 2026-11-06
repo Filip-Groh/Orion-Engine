@@ -1,0 +1,15 @@
+[package]
+name = "orion-renderer"
+version.workspace = true
+edition.workspace = true
+
+[dependencies]
+anyhow.workspace = true
+ash.workspace = true
+ash-window.workspace = true
+bytemuck.workspace = true
+orion-scene.workspace = true
+raw-window-handle.workspace = true
+
+[build-dependencies]
+naga.workspace = true
