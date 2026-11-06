@@ -2,7 +2,7 @@ use bytemuck::pod_read_unaligned;
 use orion_scene::Scene;
 
 use super::*;
-use crate::TransformSnapshot;
+use crate::{TransformSnapshot, Wireframes};
 
 const EXTENT: vk::Extent2D = vk::Extent2D {
     width: 960,
@@ -18,6 +18,22 @@ fn empty_scene() -> Scene {
 }
 
 #[test]
+fn packs_each_wireframe_flag_without_changing_the_scene_format() {
+    let scene = empty_scene();
+    for (meshes, bvh, flags) in [
+        (false, false, 0),
+        (true, false, 1),
+        (false, true, 2),
+        (true, true, 3),
+    ] {
+        let frame = SceneFrame::new(&scene).with_wireframes(Wireframes { meshes, bvh });
+        let bytes = pack_scene(frame, EXTENT, true, 1024).unwrap();
+        let header: SceneHeader = pod_read_unaligned(&bytes[..size_of::<SceneHeader>()]);
+        assert_eq!(header.extent_format, [960, 540, 1, flags]);
+    }
+}
+
+#[test]
 fn packs_the_active_camera_and_current_world_geometry() {
     let mut scene = empty_scene();
     scene.active_camera = scene.world.spawn((scene.camera().unwrap(),));
@@ -27,11 +43,15 @@ fn packs_the_active_camera_and_current_world_geometry() {
         radius: 1.0,
         albedo: [1.0; 3],
     },));
+    let triangle = Triangle {
+        vertices: [[0.0, 0.0, 0.0], [1.0, 0.0, 0.0], [0.0, 1.0, 0.0]],
+        albedo: [1.0; 3],
+    };
     let mesh = scene.world.spawn((Mesh {
-        triangles: vec![Triangle {
-            vertices: [[0.0, 0.0, 0.0], [1.0, 0.0, 0.0], [0.0, 1.0, 0.0]],
-            albedo: [1.0; 3],
-        }],
+        triangles: vec![triangle],
+    },));
+    let other_mesh = scene.world.spawn((Mesh {
+        triangles: vec![triangle; 3],
     },));
     scene.world.spawn((Mesh { triangles: vec![] },));
 
@@ -39,14 +59,31 @@ fn packs_the_active_camera_and_current_world_geometry() {
     let bytes = pack_scene(SceneFrame::new(&scene), EXTENT, false, 1024).unwrap();
     let header: SceneHeader = pod_read_unaligned(&bytes[..header_size]);
     assert_eq!(header.eye_and_fov_scale[..3], [1.0, 2.0, 3.0]);
-    assert_eq!(header.geometry_counts, [1, 1, 1, 0]);
+    assert_eq!(header.geometry_counts, [1, 4, 3, 0]);
+    assert_eq!(
+        SceneStats::from_scene(&scene),
+        SceneStats {
+            triangles: 4,
+            sdfs: 2,
+            bvh_nodes: 3,
+        }
+    );
 
     scene.world.despawn(sphere).unwrap();
     scene.world.remove_one::<Mesh>(mesh).unwrap();
+    scene.world.despawn(other_mesh).unwrap();
     let bytes = pack_scene(SceneFrame::new(&scene), EXTENT, false, 1024).unwrap();
     let header: SceneHeader = pod_read_unaligned(&bytes[..header_size]);
     assert_eq!(header.geometry_counts, [0; 4]);
     assert_eq!(bytes.len(), header_size + size_of::<[f32; 4]>());
+    assert_eq!(
+        SceneStats::from_scene(&scene),
+        SceneStats {
+            triangles: 0,
+            sdfs: 1,
+            bvh_nodes: 0,
+        }
+    );
 }
 
 #[test]

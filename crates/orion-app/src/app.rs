@@ -1,18 +1,14 @@
 mod events;
+mod hud;
 mod input;
 
 use std::time::Instant;
 
 use anyhow::{Context, Result};
-use orion_renderer::{Renderer, SceneFrame, TransformSnapshot};
+use orion_renderer::{Renderer, SceneFrame, SceneStats, TransformSnapshot};
 use winit::{event_loop::EventLoop, window::Window};
 
-use crate::{
-    freecam::FreecamInput,
-    rates::{self, RateCounter},
-    simulation::Simulation,
-    tick::TickClock,
-};
+use crate::{freecam::FreecamInput, rates::RateCounter, simulation::Simulation, tick::TickClock};
 
 pub(crate) struct App {
     renderer: Option<Renderer<Window>>,
@@ -20,6 +16,7 @@ pub(crate) struct App {
     clock: Option<TickClock>,
     previous: TransformSnapshot,
     cursor_captured: bool,
+    hud: hud::Hud,
     fps: RateCounter,
     tps: RateCounter,
     occluded: bool,
@@ -36,6 +33,7 @@ impl App {
             clock: None,
             previous: TransformSnapshot::default(),
             cursor_captured: false,
+            hud: hud::Hud::default(),
             fps: RateCounter::default(),
             tps: RateCounter::default(),
             occluded: false,
@@ -107,13 +105,25 @@ impl App {
         let fraction = self.clock.as_ref().map_or(1.0, |clock| {
             clock.interpolation_fraction(now, self.simulation.tick)
         });
-        let frame = SceneFrame::interpolated(&self.simulation.scene, &self.previous, fraction);
+        let scene = &self.simulation.scene;
+        let frame = SceneFrame::interpolated(scene, &self.previous, fraction)
+            .with_wireframes(self.hud.wireframes);
+        let hud = &mut self.hud;
         let presented = renderer
-            .render_frame_with_overlay(
+            .render_frame_with_overlay_input(
                 frame,
                 [size.width, size.height],
                 scale,
-                |ui| rates::draw(ui, &self.fps, &self.tps),
+                &mut hud.events,
+                |ui| {
+                    hud.rect = Some(hud::draw(
+                        ui,
+                        &self.fps,
+                        &self.tps,
+                        SceneStats::from_scene(scene),
+                        &mut hud.wireframes,
+                    ));
+                },
                 Window::pre_present_notify,
             )
             .context("render the scene")?;
@@ -127,6 +137,9 @@ impl App {
     fn drop_renderer(&mut self) {
         self.release_cursor();
         self.renderer = None;
+        self.hud.pointer_gone();
+        self.hud.events.clear();
+        self.hud.rect = None;
         self.clock = None;
         self.previous = TransformSnapshot::default();
         self.simulation.clear_input();

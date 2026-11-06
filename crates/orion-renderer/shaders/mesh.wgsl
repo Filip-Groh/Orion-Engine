@@ -6,6 +6,10 @@ fn triangle_at(index: u32) -> Triangle {
                     bitcast<vec3<f32>>(scene.geometry[offset + 3u].xyz));
 }
 
+fn bvh_start() -> u32 {
+    return 2u * scene.geometry_counts.x + 4u * scene.geometry_counts.y;
+}
+
 // Front-face Möller–Trumbore intersection. FAR represents a miss.
 fn triangle_distance(origin: vec3<f32>, direction: vec3<f32>, triangle: Triangle) -> f32 {
     let ab = triangle.b - triangle.a;
@@ -48,7 +52,7 @@ fn trace_meshes(origin: vec3<f32>, direction: vec3<f32>) -> RayHit {
     var closest = RayHit(FAR, NO_TRIANGLE);
     let parallel = direction == vec3<f32>(0.0);
     let inverse_direction = 1.0 / select(direction, vec3<f32>(1.0), parallel);
-    let nodes_start = 2u * scene.geometry_counts.x + 4u * scene.geometry_counts.y;
+    let nodes_start = bvh_start();
     var node = 0u;
     while node < scene.geometry_counts.z {
         let offset = nodes_start + 2u * node;

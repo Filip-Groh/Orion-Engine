@@ -5,7 +5,7 @@ use orion_renderer::Renderer;
 use winit::{
     application::ApplicationHandler,
     dpi::LogicalSize,
-    event::{DeviceEvent, DeviceId, ElementState, MouseButton, StartCause, WindowEvent},
+    event::{DeviceEvent, DeviceId, MouseButton, StartCause, WindowEvent},
     event_loop::{ActiveEventLoop, ControlFlow},
     window::{Window, WindowId},
 };
@@ -71,19 +71,29 @@ impl ApplicationHandler for App {
         };
         match event {
             WindowEvent::CloseRequested | WindowEvent::Destroyed => event_loop.exit(),
+            WindowEvent::CursorMoved { position, .. } if !self.cursor_captured => {
+                let position = position.to_logical::<f32>(renderer.window().scale_factor());
+                self.hud.pointer_moved(egui::pos2(position.x, position.y));
+            }
+            WindowEvent::CursorLeft { .. } => self.hud.pointer_gone(),
             WindowEvent::MouseInput {
-                state: ElementState::Pressed,
+                state,
                 button: MouseButton::Left,
                 ..
-            } => {
-                self.capture_cursor();
+            } if !self.cursor_captured => {
+                let pressed = state.is_pressed();
+                if !self.hud.pointer_button(pressed) && pressed {
+                    self.capture_cursor();
+                }
             }
             WindowEvent::Focused(false) => {
+                self.hud.pointer_gone();
                 self.release_cursor();
             }
             WindowEvent::Occluded(occluded) => {
                 self.occluded = occluded;
                 if occluded {
+                    self.hud.pointer_gone();
                     self.release_cursor();
                     self.fps = RateCounter::default();
                 } else {
@@ -104,6 +114,7 @@ impl ApplicationHandler for App {
                 }
             }
             WindowEvent::ScaleFactorChanged { .. } => {
+                self.hud.pointer_gone();
                 renderer.window().request_redraw();
             }
             WindowEvent::RedrawRequested => {

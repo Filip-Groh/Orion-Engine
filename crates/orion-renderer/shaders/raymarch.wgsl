@@ -16,11 +16,16 @@ fn normal_at(p: vec3<f32>) -> vec3<f32> {
     ));
 }
 
-fn shade(origin: vec3<f32>, direction: vec3<f32>) -> vec3<f32> {
+fn shade(origin: vec3<f32>, direction: vec3<f32>, pixel_scale: f32) -> vec3<f32> {
     let sky = mix(vec3<f32>(0.37, 0.51, 0.68), vec3<f32>(0.10, 0.22, 0.41),
                   clamp(direction.y * 2.0, 0.0, 1.0));
     let hit = trace_scene(origin, direction);
     let distance = hit.distance;
+    let wireframes = scene.extent_format.w;
+    if (wireframes & BVH_WIREFRAME) != 0u &&
+       bvh_wireframe(origin, direction, pixel_scale, min(FAR, distance + HIT_EPSILON)) {
+        return vec3<f32>(1.0, 0.36, 0.025);
+    }
     if distance >= FAR {
         return sky;
     }
@@ -33,6 +38,10 @@ fn shade(origin: vec3<f32>, direction: vec3<f32>) -> vec3<f32> {
         albedo = sample_scene(p).albedo;
     } else {
         let triangle = triangle_at(hit.triangle_index);
+        if (wireframes & MESH_WIREFRAME) != 0u &&
+           mesh_wireframe(origin, direction, triangle, pixel_scale * 1.4) {
+            return vec3<f32>(0.04, 0.85, 1.0);
+        }
         normal = normalize(cross(triangle.b - triangle.a, triangle.c - triangle.a));
         albedo = triangle.albedo;
     }
@@ -65,7 +74,8 @@ fn main(@builtin(global_invocation_id) id: vec3<u32>) {
     let right = normalize(cross(forward, vec3<f32>(0.0, 1.0, 0.0)));
     let up = cross(right, forward);
     let direction = normalize(forward + scene.eye.w * (screen.x * right - screen.y * up));
-    let color = to_srgb(shade(scene.eye.xyz, direction));
+    let pixel_scale = 2.0 * scene.eye.w * dot(direction, forward) / size.y;
+    let color = to_srgb(shade(scene.eye.xyz, direction, pixel_scale));
     let ordered = select(color, color.bgr, scene.extent_format.z != 0u);
     pixels[id.y * extent.x + id.x] = pack4x8unorm(vec4<f32>(ordered, 1.0));
 }

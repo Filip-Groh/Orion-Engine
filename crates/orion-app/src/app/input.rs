@@ -25,6 +25,7 @@ impl App {
             .or_else(|_| window.set_cursor_grab(CursorGrabMode::Confined))
         {
             Ok(()) => {
+                self.hud.pointer_gone();
                 self.cursor_captured = true;
                 window.set_cursor_visible(false);
             }

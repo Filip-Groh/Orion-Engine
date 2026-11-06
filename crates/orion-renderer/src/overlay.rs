@@ -47,6 +47,7 @@ impl Overlay {
         command_pool: vk::CommandPool,
         extent: vk::Extent2D,
         scale: f32,
+        events: Vec<egui::Event>,
         draw_ui: impl FnMut(&mut egui::Ui),
     ) -> Result<OverlayFrame> {
         // The previous dispatch fence has signaled, so its textures can be freed.
@@ -59,6 +60,7 @@ impl Overlay {
         let screen_size = egui::vec2(extent.width as f32 / scale, extent.height as f32 / scale);
         let mut input = egui::RawInput {
             screen_rect: Some(egui::Rect::from_min_size(egui::Pos2::ZERO, screen_size)),
+            events,
             ..Default::default()
         };
         input

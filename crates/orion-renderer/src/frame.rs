@@ -17,7 +17,7 @@ impl<W> Renderer<W> {
         &mut self,
         frame: SceneFrame<'_>,
         [width, height]: [u32; 2],
-        overlay: Option<(f32, impl FnMut(&mut egui::Ui))>,
+        overlay: Option<(f32, &mut Vec<egui::Event>, impl FnMut(&mut egui::Ui))>,
         before_present: impl FnOnce(&W),
     ) -> Result<FrameOutcome> {
         if width == 0 || height == 0 {
@@ -50,7 +50,7 @@ impl<W> Renderer<W> {
         let ready = swapchain.images[index as usize].ready;
         // Build egui only after acquisition so a retry cannot discard texture updates.
         let overlay_frame = overlay
-            .map(|(scale, draw_ui)| {
+            .map(|(scale, events, draw_ui)| {
                 self.overlay
                     .as_mut()
                     .expect("egui renderer was initialized")
@@ -59,6 +59,7 @@ impl<W> Renderer<W> {
                         self.dispatch.command_pool,
                         extent,
                         scale,
+                        std::mem::take(events),
                         draw_ui,
                     )
             })

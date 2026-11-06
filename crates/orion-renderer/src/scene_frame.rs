@@ -32,9 +32,17 @@ impl TransformSnapshot {
     }
 }
 
+/// Optional edge overlays for a render frame.
+#[derive(Clone, Copy, Debug, Default)]
+pub struct Wireframes {
+    pub meshes: bool,
+    pub bvh: bool,
+}
+
 /// Read-only scene sampling for a render frame.
 pub struct SceneFrame<'a> {
     pub(super) scene: &'a Scene,
+    pub(super) wireframes: Wireframes,
     previous: Option<(&'a TransformSnapshot, f64)>,
 }
 
@@ -42,6 +50,7 @@ impl<'a> SceneFrame<'a> {
     pub fn new(scene: &'a Scene) -> Self {
         Self {
             scene,
+            wireframes: Wireframes::default(),
             previous: None,
         }
     }
@@ -50,8 +59,14 @@ impl<'a> SceneFrame<'a> {
     pub fn interpolated(scene: &'a Scene, previous: &'a TransformSnapshot, fraction: f32) -> Self {
         Self {
             scene,
+            wireframes: Wireframes::default(),
             previous: (fraction < 1.0).then_some((previous, f64::from(fraction.max(0.0)))),
         }
+    }
+
+    pub fn with_wireframes(mut self, wireframes: Wireframes) -> Self {
+        self.wireframes = wireframes;
+        self
     }
 
     pub(super) fn camera(&self) -> Result<Camera> {

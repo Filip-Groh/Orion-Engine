@@ -8,6 +8,7 @@ struct Triangle {
 struct Scene {
     eye: vec4<f32>,
     look_at: vec4<f32>,
+    // Pixel width, pixel height, BGRA flag, and wireframe flags.
     extent_format: vec4<u32>,
     geometry_counts: vec4<u32>,
     // Two vec4s per sphere, four per triangle, then two per BVH node.
@@ -30,6 +31,8 @@ struct RayHit {
 const HIT_EPSILON: f32 = 0.001;
 const FAR: f32 = 50.0;
 const NO_TRIANGLE: u32 = 0xffffffffu;
+const MESH_WIREFRAME: u32 = 1u;
+const BVH_WIREFRAME: u32 = 2u;
 
 fn sample_scene(p: vec3<f32>) -> Surface {
     let tile = (i32(floor(p.x)) + i32(floor(p.z))) & 1;

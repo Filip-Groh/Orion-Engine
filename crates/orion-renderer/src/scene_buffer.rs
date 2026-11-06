@@ -1,12 +1,33 @@
 use anyhow::{Result, ensure};
 use ash::vk;
 use bytemuck::{Pod, Zeroable, bytes_of, cast_slice};
-use orion_scene::{Camera, Entity, Mesh, Sphere, Triangle};
+use orion_scene::{Camera, Entity, Mesh, Scene, Sphere, Triangle};
 
 use crate::{
     SceneFrame,
     bvh::{self, BvhNode},
 };
+
+/// Geometry totals for the renderer's scene overlay.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct SceneStats {
+    pub triangles: usize,
+    pub sdfs: usize,
+    pub bvh_nodes: usize,
+}
+
+impl SceneStats {
+    pub fn from_scene(scene: &Scene) -> Self {
+        let spheres = scene.world.query::<&Sphere>().iter().len();
+        let (mesh_count, triangles) = mesh_counts(scene.world.query::<&Mesh>().iter());
+        Self {
+            triangles,
+            // sample_scene in scene.wgsl also includes the implicit ground plane.
+            sdfs: spheres + 1,
+            bvh_nodes: bvh::node_count(mesh_count),
+        }
+    }
+}
 
 // The WGSL geometry array follows the header in sphere, triangle, BVH node order.
 #[repr(C)]
@@ -42,16 +63,13 @@ pub(super) fn pack_scene(
         // At large coordinates, rounding an interpolated target can collapse it onto the eye.
         SceneHeader::new(frame.scene.camera()?, extent, bgra)
     })?;
+    // Keep these bits in sync with the flags in scene.wgsl.
+    header.extent_format[3] =
+        u32::from(frame.wireframes.meshes) | (u32::from(frame.wireframes.bvh) << 1);
     let mut spheres = frame.scene.world.query::<(Entity, &Sphere)>();
     let mut meshes = frame.scene.world.query::<&Mesh>();
     let sphere_count = spheres.iter().len();
-    let (mesh_count, triangle_count) = meshes
-        .iter()
-        .map(|mesh| mesh.triangles.len())
-        .filter(|&count| count > 0)
-        .fold((0, 0), |(meshes, triangles), count| {
-            (meshes + 1, triangles + count)
-        });
+    let (mesh_count, triangle_count) = mesh_counts(meshes.iter());
     let node_count = bvh::node_count(mesh_count);
     let size = scene_buffer_size(sphere_count, triangle_count, node_count, max_bytes)?;
     header.geometry_counts = [
@@ -79,6 +97,15 @@ pub(super) fn pack_scene(
     bytes.extend_from_slice(cast_slice(&bvh::build(&mut leaves)));
     bytes.resize(size, 0);
     Ok(bytes)
+}
+
+fn mesh_counts<'a>(meshes: impl Iterator<Item = &'a Mesh>) -> (usize, usize) {
+    meshes
+        .map(|mesh| mesh.triangles.len())
+        .filter(|&count| count > 0)
+        .fold((0, 0), |(meshes, triangles), count| {
+            (meshes + 1, triangles + count)
+        })
 }
 
 impl SceneHeader {

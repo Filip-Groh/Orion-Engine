@@ -24,7 +24,8 @@ use frame::FrameOutcome;
 pub use offscreen::OffscreenRenderer;
 use overlay::Overlay;
 use pipeline::Pipeline;
-pub use scene_frame::{SceneFrame, TransformSnapshot};
+pub use scene_buffer::SceneStats;
+pub use scene_frame::{SceneFrame, TransformSnapshot, Wireframes};
 use swapchain::Swapchain;
 
 pub struct Renderer<W> {
@@ -79,7 +80,7 @@ impl<W: HasDisplayHandle + HasWindowHandle> Renderer<W> {
         let result = self.render_frame(
             SceneFrame::new(scene),
             size,
-            None::<(f32, fn(&mut egui::Ui))>,
+            None::<(f32, &mut Vec<egui::Event>, fn(&mut egui::Ui))>,
             before_present,
         )?;
         Ok(matches!(result, FrameOutcome::Retry))
@@ -106,6 +107,26 @@ impl<W: HasDisplayHandle + HasWindowHandle> Renderer<W> {
         draw_ui: impl FnMut(&mut egui::Ui),
         before_present: impl FnOnce(&W),
     ) -> Result<bool> {
+        self.render_frame_with_overlay_input(
+            frame,
+            size,
+            scale,
+            &mut Vec::new(),
+            draw_ui,
+            before_present,
+        )
+    }
+
+    /// Renders an interactive overlay, consuming its input once a swapchain image is acquired.
+    pub fn render_frame_with_overlay_input(
+        &mut self,
+        frame: SceneFrame<'_>,
+        size: [u32; 2],
+        scale: f32,
+        events: &mut Vec<egui::Event>,
+        draw_ui: impl FnMut(&mut egui::Ui),
+        before_present: impl FnOnce(&W),
+    ) -> Result<bool> {
         ensure!(
             self.overlay_enabled,
             "create the renderer with egui overlay support first"
@@ -114,7 +135,8 @@ impl<W: HasDisplayHandle + HasWindowHandle> Renderer<W> {
             scale.is_finite() && scale > 0.0,
             "egui requires a positive finite scale factor"
         );
-        let result = self.render_frame(frame, size, Some((scale, draw_ui)), before_present)?;
+        let result =
+            self.render_frame(frame, size, Some((scale, events, draw_ui)), before_present)?;
         Ok(matches!(result, FrameOutcome::Presented))
     }
 }
