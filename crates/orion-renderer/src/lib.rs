@@ -10,7 +10,7 @@ use std::io::Cursor;
 use anyhow::{Context, Result, ensure};
 use ash::vk;
 use bytemuck::{Pod, Zeroable, bytes_of, cast_slice};
-use orion_scene::Scene;
+use orion_scene::{Mesh, Scene, Sphere};
 use raw_window_handle::{HasDisplayHandle, HasWindowHandle};
 
 use bvh::BvhNode;
@@ -568,27 +568,31 @@ fn pack_scene(
     bgra: bool,
     max_bytes: usize,
 ) -> Result<Vec<u8>> {
-    let [x, y, z] = scene.camera.eye;
-    let [tx, ty, tz] = scene.camera.target;
+    let camera = scene.camera()?;
+    let [x, y, z] = camera.eye;
+    let [tx, ty, tz] = camera.target;
     let horizontal_squared = (tx - x).powi(2) + (tz - z).powi(2);
     let distance_squared = horizontal_squared + (ty - y).powi(2);
     ensure!(
         horizontal_squared >= f32::MIN_POSITIVE && distance_squared.is_finite(),
         "camera must look in a finite direction with a horizontal component"
     );
-    let fov = scene.camera.vertical_fov_degrees;
+    let fov = camera.vertical_fov_degrees;
     ensure!(
         fov > 0.0 && fov < 180.0,
         "vertical FOV must be between 0 and 180 degrees"
     );
 
-    let sphere_count = scene.spheres.len();
-    let triangle_count: usize = scene.meshes.iter().map(|mesh| mesh.triangles.len()).sum();
-    let mesh_count = scene
-        .meshes
+    let mut spheres = scene.world.query::<&Sphere>();
+    let mut meshes = scene.world.query::<&Mesh>();
+    let sphere_count = spheres.iter().len();
+    let (mesh_count, triangle_count) = meshes
         .iter()
-        .filter(|mesh| !mesh.triangles.is_empty())
-        .count();
+        .map(|mesh| mesh.triangles.len())
+        .filter(|&count| count > 0)
+        .fold((0, 0), |(meshes, triangles), count| {
+            (meshes + 1, triangles + count)
+        });
     let node_count = bvh::node_count(mesh_count);
     let header_size = size_of::<SceneHeader>();
     // The runtime array needs one vec4 even when the scene has no geometry.
@@ -614,7 +618,7 @@ fn pack_scene(
     };
     let mut bytes = Vec::with_capacity(header_size + geometry_bytes);
     bytes.extend_from_slice(bytes_of(&header));
-    for sphere in &scene.spheres {
+    for sphere in spheres.iter() {
         ensure!(
             sphere.radius.is_finite()
                 && sphere.radius > 0.0
@@ -638,11 +642,7 @@ fn pack_scene(
     }
     let mut leaves = Vec::with_capacity(mesh_count);
     let mut first_triangle = 0;
-    for mesh in scene
-        .meshes
-        .iter()
-        .filter(|mesh| !mesh.triangles.is_empty())
-    {
+    for mesh in meshes.iter().filter(|mesh| !mesh.triangles.is_empty()) {
         let count = mesh.triangles.len() as u32;
         let mut leaf = BvhNode::new(first_triangle, count);
         for triangle in &mesh.triangles {
@@ -674,4 +674,48 @@ fn pack_scene(
     bytes.extend_from_slice(cast_slice(&bvh::build(&mut leaves)));
     bytes.resize(header_size + geometry_bytes, 0);
     Ok(bytes)
+}
+
+#[cfg(test)]
+mod tests {
+    use bytemuck::pod_read_unaligned;
+    use orion_scene::{Camera, Triangle};
+
+    use super::*;
+
+    #[test]
+    fn packs_the_active_camera_and_current_world_geometry() {
+        let mut scene = Scene::new(Camera {
+            eye: [0.0, 1.0, 2.0],
+            target: [0.0, 0.0, 0.0],
+            vertical_fov_degrees: 38.0,
+        });
+        scene.active_camera = scene.world.spawn((scene.camera().unwrap(),));
+        scene.camera_mut().unwrap().eye = [1.0, 2.0, 3.0];
+        let sphere = scene.world.spawn((Sphere {
+            center: [0.0; 3],
+            radius: 1.0,
+            albedo: [1.0; 3],
+        },));
+        let mesh = scene.world.spawn((Mesh {
+            triangles: vec![Triangle {
+                vertices: [[0.0, 0.0, 0.0], [1.0, 0.0, 0.0], [0.0, 1.0, 0.0]],
+                albedo: [1.0; 3],
+            }],
+        },));
+        scene.world.spawn((Mesh { triangles: vec![] },));
+
+        let header_size = size_of::<SceneHeader>();
+        let bytes = pack_scene(&scene, 960, 540, false, 1024).unwrap();
+        let header: SceneHeader = pod_read_unaligned(&bytes[..header_size]);
+        assert_eq!(header.eye_and_fov_scale[..3], [1.0, 2.0, 3.0]);
+        assert_eq!(header.geometry_counts, [1, 1, 1, 0]);
+
+        scene.world.despawn(sphere).unwrap();
+        scene.world.remove_one::<Mesh>(mesh).unwrap();
+        let bytes = pack_scene(&scene, 960, 540, false, 1024).unwrap();
+        let header: SceneHeader = pod_read_unaligned(&bytes[..header_size]);
+        assert_eq!(header.geometry_counts, [0; 4]);
+        assert_eq!(bytes.len(), header_size + size_of::<[f32; 4]>());
+    }
 }

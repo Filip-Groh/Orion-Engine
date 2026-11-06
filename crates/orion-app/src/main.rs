@@ -65,7 +65,8 @@ impl ApplicationHandler for App {
 
     fn device_event(&mut self, _: &ActiveEventLoop, _: DeviceId, event: DeviceEvent) {
         if let (Some(renderer), DeviceEvent::MouseMotion { delta }) = (&self.renderer, event)
-            && self.freecam.look(&mut self.scene.camera, delta)
+            && let Ok(camera) = self.scene.camera_mut()
+            && self.freecam.look(camera, delta)
         {
             renderer.window().request_redraw();
         }
@@ -109,7 +110,9 @@ impl ApplicationHandler for App {
                     let pressed = event.state.is_pressed();
                     if key == KeyCode::Escape && pressed {
                         self.freecam.release(renderer.window());
-                    } else if self.freecam.set_key(&mut self.scene.camera, key, pressed) {
+                    } else if let Ok(camera) = self.scene.camera_mut()
+                        && self.freecam.set_key(camera, key, pressed)
+                    {
                         renderer.window().request_redraw();
                     }
                 }
@@ -128,7 +131,9 @@ impl ApplicationHandler for App {
                     self.fps = FpsCounter::default();
                     return;
                 }
-                self.freecam.step(&mut self.scene.camera);
+                if let Ok(camera) = self.scene.camera_mut() {
+                    self.freecam.step(camera);
+                }
                 let scale = renderer.window().scale_factor() as f32;
                 match renderer.render_with_overlay(
                     &self.scene,
@@ -173,7 +178,7 @@ fn main() -> Result<()> {
     let event_loop = EventLoop::new().context("create the window event loop")?;
     let mut app = App {
         renderer: None,
-        freecam: Freecam::new(&scene.camera),
+        freecam: Freecam::new(&scene.camera()?),
         fps: FpsCounter::default(),
         occluded: false,
         scene,

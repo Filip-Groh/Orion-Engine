@@ -179,10 +179,13 @@ mod tests {
     #[test]
     fn demo_keeps_the_triangle_and_suzanne_in_separate_meshes() {
         let scene = crate::Scene::demo();
-        let [triangle, suzanne] = scene.meshes.as_slice() else {
-            panic!("expected two demo meshes");
-        };
-        assert_eq!(triangle.triangles.len(), 1);
-        assert_eq!(suzanne.triangles.len(), 32 + 468 * 2);
+        let mut triangle_counts: Vec<_> = scene
+            .world
+            .query::<&crate::Mesh>()
+            .iter()
+            .map(|mesh| mesh.triangles.len())
+            .collect();
+        triangle_counts.sort_unstable();
+        assert_eq!(triangle_counts, [1, 32 + 468 * 2]);
     }
 }

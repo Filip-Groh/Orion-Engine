@@ -26,6 +26,8 @@ Click inside the window to capture the mouse for freecam. Move the mouse to look
 
 | Crate | Responsibility |
 | --- | --- |
-| [`orion-scene`](crates/orion-scene) | Camera, sphere and triangle parameters, OBJ import, and the demo scene. |
+| [`orion-scene`](crates/orion-scene) | [hecs](https://github.com/Ralith/hecs) world, scene components, OBJ import, and demo setup. |
 | [`orion-renderer`](crates/orion-renderer) | Vulkan device, compute pipeline, scene upload, and swapchain presentation. The ray marcher and shading live in [`raymarch.wgsl`](crates/orion-renderer/shaders/raymarch.wgsl). |
 | [`orion-app`](crates/orion-app) | Default executable. It owns the winit event loop and drives the demo. |
+
+`Scene::world` stores cameras, spheres, and meshes as components. Set `Scene::active_camera` to select the camera entity. The renderer queries the world each frame, so spawning or despawning a sphere or mesh affects the next frame. `Scene::import_obj` returns the entity for the imported mesh.
